@@ -5,4 +5,15 @@
 #
 # Enter at least three non-collinear, accurately surveyed pairs. Four or more
 # pairs are recommended because the affine transform is fitted by least squares.
-pairs: []
+pairs:
+  - id: "p0"
+    world: [0.0, 0.0]          # /Odometry 中的 x、y，单位米
+    gps: [30.3263858, 120.0594306] # 纬度、经度，WGS-84
+
+  - id: "p1"
+    world: [8.4, 0.0]
+    gps: [30.3263696, 120.0595111]
+
+  - id: "p2"
+    world: [0.0, 21.9]
+    gps: [30.3265756, 120.0594896]

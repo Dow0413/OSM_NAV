@@ -15,15 +15,28 @@ const map = L.map('map', {
   maxBoundsViscosity: 1.0,
 });
 const vectorRenderer = L.canvas({padding: 0.5});
-L.tileLayer(
-  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-  {
-    maxZoom: 19,
-    attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
-  },
-).addTo(map);
+let satelliteLayer;
 
-const groupNames = ['features', 'roads', 'arrows', 'nodes', 'signals', 'labels', 'route', 'endpoints'];
+function setSatelliteBase(enabled) {
+  if (satelliteLayer) {
+    map.removeLayer(satelliteLayer);
+    satelliteLayer = undefined;
+  }
+  if (enabled) {
+    satelliteLayer = L.tileLayer(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+      {
+        maxZoom: 19,
+        attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
+      },
+    ).addTo(map);
+  }
+  document.querySelector('.map-toolbar span').textContent = enabled
+    ? '卫星底图 · 滚轮缩放 · 拖拽平移 · 任意点击设置起终点'
+    : 'OSM 矢量底图 · 滚轮缩放 · 拖拽平移 · 任意点击设置起终点';
+}
+
+const groupNames = ['features', 'roads', 'arrows', 'nodes', 'signals', 'labels', 'route', 'endpoints', 'robot'];
 const layers = Object.fromEntries(groupNames.map(name => [name, L.layerGroup().addTo(map)]));
 const roadStyle = {
   motorway: ['#f0cf6e', 7], trunk: ['#f1dc85', 6], primary: ['#f4e99e', 5],
@@ -38,7 +51,7 @@ const areaStyle = {
 };
 const displaySettings = {road: .65, arrow: 1, label: .65, node: 1, feature: .65, signal: 1, route: .65, endpoint: 1};
 const layerSettings = {roads: true, arrows: true, labels: false, nodes: false, features: false, signals: false, route: true, endpoints: true};
-const uiConfig = {default_display_mode: 'compact'};
+const uiConfig = {default_display_mode: 'compact', use_leaflet: true, mode: 0};
 let mapData;
 let osmBounds;
 let initialBoundsSet = false;
@@ -49,6 +62,7 @@ let lastRoute;
 let displayMode = 'compact';
 let hoverPoint;
 let hoverFrame = 0;
+let robotPose;
 
 function updateStatus(text) {
   statusBox.textContent = text;
@@ -136,7 +150,7 @@ function drawPoints() {
 function drawRoute() {
   if (!layerSettings.route || !lastRoute) return;
   L.polyline(lastRoute.path, {renderer: vectorRenderer, color: '#d94b42', weight: scaled(4.2, 'route'), lineCap: 'round', lineJoin: 'round', interactive: false}).addTo(layers.route);
-  for (const [selected, snapped] of [[start, lastRoute.startSnap], [goal, lastRoute.goalSnap]]) {
+  for (const [selected, snapped] of [[lastRoute.selectedStart || start, lastRoute.startSnap], [lastRoute.selectedGoal || goal, lastRoute.goalSnap]]) {
     if (selected && snapped && L.latLng(selected).distanceTo(snapped) > .1) {
       L.polyline([selected, snapped], {renderer: vectorRenderer, color: '#65747b', weight: scaled(1.4, 'route'), dashArray: '4 4', interactive: false}).addTo(layers.route);
     }
@@ -146,8 +160,11 @@ function drawRoute() {
 function drawEndpoints() {
   if (!layerSettings.endpoints) return;
   if (referencePoint) L.circleMarker(referencePoint, {renderer: vectorRenderer, radius: scaled(4, 'endpoint'), color: '#fff', fillColor: '#9653b6', fillOpacity: 1, weight: scaled(1.1, 'endpoint'), interactive: false}).addTo(layers.endpoints);
-  if (start) L.circleMarker(start, {renderer: vectorRenderer, radius: scaled(5, 'endpoint'), color: '#183243', fillColor: '#269c53', fillOpacity: 1, weight: scaled(1.1, 'endpoint'), interactive: false}).addTo(layers.endpoints);
+  if (start && Number(uiConfig.mode) !== 1) L.circleMarker(start, {renderer: vectorRenderer, radius: scaled(5, 'endpoint'), color: '#183243', fillColor: '#269c53', fillOpacity: 1, weight: scaled(1.1, 'endpoint'), interactive: false}).addTo(layers.endpoints);
   if (goal) L.circleMarker(goal, {renderer: vectorRenderer, radius: scaled(5, 'endpoint'), color: '#183243', fillColor: '#1c73bc', fillOpacity: 1, weight: scaled(1.1, 'endpoint'), interactive: false}).addTo(layers.endpoints);
+  if (Number(uiConfig.mode) === 1 && robotPose) {
+    L.circleMarker([robotPose.latitude, robotPose.longitude], {renderer: vectorRenderer, radius: scaled(6, 'endpoint'), color: '#183243', fillColor: '#f07d32', fillOpacity: 1, weight: scaled(1.3, 'endpoint'), interactive: false}).addTo(layers.robot);
+  }
 }
 
 function renderMap() {
@@ -210,6 +227,14 @@ function resetSelection() {
 
 function choosePoint(latlng) {
   const point = [latlng.lat, latlng.lng];
+  if (Number(uiConfig.mode) === 1) {
+    goal = point;
+    lastRoute = null;
+    navigate.disabled = !robotPose;
+    renderMap();
+    updateStatus(robotPose ? '已选择终点。点击“开启导航”将发布 /global_path。' : '已选择终点，正在等待 /Odometry 定位消息。');
+    return;
+  }
   if (!start) {
     start = point;
     updateStatus('已选择起点。请点击地图选择终点。');
@@ -267,6 +292,21 @@ async function loadMap() {
     updateStatus(displayMode === 'compact' ? '卫星底图与简略道路图已加载。点击地图选择起点。' : '卫星底图与全部地图要素已加载。点击地图选择起点。');
   } catch (error) {
     updateStatus(`地图加载失败：${error}`);
+  }
+}
+
+async function pollRobotPose() {
+  if (Number(uiConfig.mode) !== 1) return;
+  try {
+    const response = await fetch('/api/robot_pose');
+    const pose = await response.json();
+    if (!response.ok || !pose.available) return;
+    robotPose = pose;
+    start = [pose.latitude, pose.longitude];
+    if (goal) navigate.disabled = false;
+    renderMap();
+  } catch (error) {
+    console.warn('Unable to read robot position:', error);
   }
 }
 
@@ -341,12 +381,19 @@ navigate.addEventListener('click', async () => {
     updateStatus(`规划失败：${data.error}`);
     return;
   }
-  lastRoute = {path: data.path, startSnap: data.start.coordinate, goalSnap: data.goal.coordinate};
+  lastRoute = {
+    path: data.path,
+    startSnap: data.start.coordinate,
+    goalSnap: data.goal.coordinate,
+    selectedStart: [...start],
+    selectedGoal: [...goal],
+  };
   renderMap();
   const roadText = place => `${place.road.name || place.road.kind}，偏移 ${place.distance_m.toFixed(1)} m`;
   const signalText = data.traffic_signal_count ? `交通信号点：${data.traffic_signal_count} 处（执行时等待绿灯）` : '交通信号点：路线未经过已标注的信号点';
   const costText = data.planning_cost_s === undefined ? '' : `\n规则代价：${data.planning_cost_s.toFixed(1)} s 等效`;
-  updateStatus(`规划完成\n路线长度：${data.distance_m.toFixed(1)} m${costText}\n${signalText}\n起点投影至：${roadText(data.start)}\n终点投影至：${roadText(data.goal)}`);
+  const publishText = data.global_path_topic ? `\n已发布 ${data.slam_path.length} 个 SLAM 路径点至：${data.global_path_topic}` : '';
+  updateStatus(`规划完成\n路线长度：${data.distance_m.toFixed(1)} m${costText}\n${signalText}\n起点投影至：${roadText(data.start)}\n终点投影至：${roadText(data.goal)}${publishText}`);
 });
 reset.addEventListener('click', resetSelection);
 
@@ -358,6 +405,13 @@ async function initialize() {
     if (uiConfig.map_name) document.getElementById('map-name').textContent = uiConfig.map_name;
   } catch (error) {
     console.warn('Using built-in UI defaults:', error);
+  }
+  setSatelliteBase(Boolean(uiConfig.use_leaflet));
+  if (Number(uiConfig.mode) === 1) {
+    document.querySelector('.steps').innerHTML = '<li>等待 <code>/Odometry</code> 定位消息</li><li>在地图点击设置终点（经纬度）</li><li>点击“开启导航”发布 <code>/global_path</code></li>';
+    navigate.disabled = true;
+    pollRobotPose();
+    window.setInterval(pollRobotPose, 250);
   }
   updateDisplayMode();
   loadMap();

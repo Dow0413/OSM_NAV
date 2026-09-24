@@ -42,6 +42,15 @@ DEFAULT_MIN_ZOOM_WIDTH = 2.0
 EARTH_RADIUS_M = 6_371_000
 
 
+def parse_bool(value):
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected a boolean: true or false")
+
+
 def tags(element):
     return {tag.attrib["k"]: tag.attrib["v"] for tag in element.findall("tag")}
 
@@ -516,7 +525,12 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None):
                         start = (latest["latitude"], latest["longitude"])
                     else:
                         start = (float(query["start_lat"][0]), float(query["start_lon"][0]))
-                    self.send_json(network.route(start, goal))
+                    route = network.route(start, goal)
+                    if mode == 1:
+                        route["slam_path"] = ros_bridge.publish_global_path(route["path"])
+                        route["global_path_topic"] = ros_bridge.global_path_topic
+                        route["start_source"] = "odometry"
+                    self.send_json(route)
                 except (KeyError, ValueError) as error:
                     self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -553,11 +567,18 @@ def main():
     parser.add_argument("--safety-multipliers", default=json.dumps(SAFETY_MULTIPLIER))
     parser.add_argument("--default-display-mode", choices=("compact", "full"), default="compact")
     parser.add_argument("--min-zoom-width", type=float, default=DEFAULT_MIN_ZOOM_WIDTH)
+    parser.add_argument("--use-leaflet", type=parse_bool, default=True)
+    parser.add_argument("--mode", type=int, choices=(0, 1), default=0)
+    parser.add_argument("--odometry-topic", default="/Odometry")
+    parser.add_argument("--global-path-topic", default="/global_path")
+    parser.add_argument("--slam-frame-id", default="map")
+    parser.add_argument("--paired-yaml", type=Path)
     args = parser.parse_args()
     if not args.map.is_file():
         parser.error(f"map file does not exist: {args.map}")
     if args.robot_dog_speed_mps <= 0 or args.signal_wait_seconds < 0 or args.min_zoom_width <= 0:
         parser.error("robot-dog speed and minimum zoom width must be positive; signal wait cannot be negative")
+    server = None
     try:
         safety_multipliers = json.loads(args.safety_multipliers)
         if not isinstance(safety_multipliers, dict):
@@ -566,13 +587,43 @@ def main():
     except (ValueError, TypeError, json.JSONDecodeError) as error:
         parser.error(f"invalid --safety-multipliers: {error}")
 
+    ros_bridge = None
+    ros_executor = None
+    ros_thread = None
+    transform_metadata = None
+    if args.mode == 1:
+        if args.paired_yaml is None:
+            parser.error("--paired-yaml is required when --mode 1")
+        try:
+            transform = SlamGpsTransform(args.paired_yaml)
+        except ValueError as error:
+            parser.error(f"invalid paired transform: {error}")
+        transform_metadata = transform.metadata()
+        rclpy.init(args=None)
+        ros_bridge = RosNavigationBridge(
+            transform, args.odometry_topic, args.global_path_topic, args.slam_frame_id
+        )
+        ros_executor = MultiThreadedExecutor()
+        ros_executor.add_node(ros_bridge)
+        ros_thread = threading.Thread(target=ros_executor.spin, name="galileo_ros_executor", daemon=True)
+        ros_thread.start()
+
     package_share = Path(get_package_share_directory("galileo_osm_nav"))
     network = OSMRoadNetwork(
         args.map, args.robot_dog_speed_mps, args.signal_wait_seconds, safety_multipliers,
-        {"default_display_mode": args.default_display_mode, "min_zoom_width": args.min_zoom_width},
+        {
+            "default_display_mode": args.default_display_mode,
+            "min_zoom_width": args.min_zoom_width,
+            "use_leaflet": args.use_leaflet,
+            "mode": args.mode,
+            "global_path_topic": args.global_path_topic,
+            "transform": transform_metadata,
+        },
     )
     try:
-        server = ThreadingHTTPServer((args.host, args.port), make_handler(network, package_share / "web"))
+        server = ThreadingHTTPServer(
+            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge)
+        )
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             parser.error(f"port {args.port} is already in use; close the existing server or choose --port <number>")
@@ -584,7 +635,14 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        server.server_close()
+        if server is not None:
+            server.server_close()
+        if ros_executor is not None:
+            ros_executor.shutdown()
+        if ros_bridge is not None:
+            ros_bridge.destroy_node()
+        if args.mode == 1 and rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == "__main__":

@@ -1,0 +1,8 @@
+# Coordinate pairs for mode: 1.
+#
+# world is the SLAM/map coordinate in metres: [x, y]
+# gps is the WGS-84 geographic coordinate in degrees: [latitude, longitude]
+#
+# Enter at least three non-collinear, accurately surveyed pairs. Four or more
+# pairs are recommended because the affine transform is fitted by least squares.
+pairs: []

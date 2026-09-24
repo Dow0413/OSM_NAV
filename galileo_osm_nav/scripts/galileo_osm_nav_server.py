@@ -7,13 +7,21 @@ import heapq
 import json
 import math
 import mimetypes
+import threading
 import xml.etree.ElementTree as ET
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
+import numpy as np
+import rclpy
 from ament_index_python.packages import get_package_share_directory
+from geometry_msgs.msg import PoseStamped
+from nav_msgs.msg import Odometry, Path as NavPath
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+import yaml
 
 # Demo profile: the robot dog emulates a pedestrian while applying conservative
 # safety policies to shared carriageways. This is not a legal certification.
@@ -68,6 +76,149 @@ def distance_m(a, b):
     dx = math.radians(a[1] - b[1]) * EARTH_RADIUS_M * math.cos(latitude)
     dy = math.radians(a[0] - b[0]) * EARTH_RADIUS_M
     return math.hypot(dx, dy)
+
+
+def _pair_values(value, field_name, index):
+    """Accept [first, second] or a named coordinate mapping from paired.yaml."""
+    if isinstance(value, dict):
+        if field_name == "world":
+            keys = ("x", "y")
+        else:
+            keys = ("latitude", "longitude")
+            if not all(key in value for key in keys):
+                keys = ("lat", "lon")
+        try:
+            return float(value[keys[0]]), float(value[keys[1]])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"pair {index} has invalid {field_name} mapping") from error
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        try:
+            return float(value[0]), float(value[1])
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"pair {index} has invalid {field_name} values") from error
+    raise ValueError(f"pair {index} must contain {field_name}: [first, second]")
+
+
+class SlamGpsTransform:
+    """Affine least-squares transform between SLAM metres and WGS-84 coordinates."""
+
+    def __init__(self, paired_yaml):
+        paired_path = Path(paired_yaml)
+        if not paired_path.is_file():
+            raise ValueError(f"paired YAML does not exist: {paired_path}")
+        try:
+            document = yaml.safe_load(paired_path.read_text(encoding="utf-8")) or {}
+        except yaml.YAMLError as error:
+            raise ValueError(f"cannot parse paired YAML: {error}") from error
+        pairs = document.get("pairs")
+        if not isinstance(pairs, list) or len(pairs) < 3:
+            raise ValueError("paired YAML needs at least 3 non-collinear entries under 'pairs'")
+
+        slam_points, gps_points = [], []
+        for index, pair in enumerate(pairs):
+            if not isinstance(pair, dict):
+                raise ValueError(f"pair {index} must be a mapping")
+            slam_points.append(_pair_values(pair.get("world", pair.get("slam")), "world", index))
+            gps_points.append(_pair_values(pair.get("gps"), "gps", index))
+
+        self.slam_points = np.asarray(slam_points, dtype=float)
+        self.gps_points = np.asarray(gps_points, dtype=float)
+        self.reference_latitude = float(np.mean(self.gps_points[:, 0]))
+        self.reference_longitude = float(np.mean(self.gps_points[:, 1]))
+        self._cos_reference_latitude = math.cos(math.radians(self.reference_latitude))
+        self.local_points = np.asarray([self._to_local(latitude, longitude) for latitude, longitude in self.gps_points])
+        design = np.column_stack((np.ones(len(self.slam_points)), self.slam_points))
+        if np.linalg.matrix_rank(design) < 3:
+            raise ValueError("paired YAML SLAM points are collinear; use at least 3 non-collinear points")
+        self.coefficients, _, _, _ = np.linalg.lstsq(design, self.local_points, rcond=None)
+        self.offset = self.coefficients[0]
+        self.linear = self.coefficients[1:].T
+        if abs(np.linalg.det(self.linear)) < 1e-10:
+            raise ValueError("paired YAML produces a singular SLAM/GPS transform")
+        fitted = design @ self.coefficients
+        self.rmse_m = float(np.sqrt(np.mean(np.sum((fitted - self.local_points) ** 2, axis=1))))
+
+    def _to_local(self, latitude, longitude):
+        return np.asarray((
+            math.radians(longitude - self.reference_longitude) * EARTH_RADIUS_M * self._cos_reference_latitude,
+            math.radians(latitude - self.reference_latitude) * EARTH_RADIUS_M,
+        ))
+
+    def _to_gps(self, east, north):
+        return (
+            self.reference_latitude + math.degrees(north / EARTH_RADIUS_M),
+            self.reference_longitude + math.degrees(east / (EARTH_RADIUS_M * self._cos_reference_latitude)),
+        )
+
+    def slam_to_gps(self, x, y):
+        east, north = self.offset + self.linear @ np.asarray((x, y))
+        return self._to_gps(float(east), float(north))
+
+    def gps_to_slam(self, latitude, longitude):
+        local = self._to_local(latitude, longitude)
+        x, y = np.linalg.solve(self.linear, local - self.offset)
+        return float(x), float(y)
+
+    def metadata(self):
+        return {"pair_count": int(len(self.slam_points)), "rmse_m": self.rmse_m}
+
+
+class RosNavigationBridge(Node):
+    """Mode-1 ROS bridge: Odometry -> GPS and GPS route -> nav_msgs/Path."""
+
+    def __init__(self, transform, odometry_topic, global_path_topic, slam_frame_id):
+        super().__init__("galileo_osm_nav_bridge")
+        self.transform = transform
+        self.slam_frame_id = slam_frame_id
+        self.global_path_topic = global_path_topic
+        self._position_lock = threading.Lock()
+        self._latest_position = None
+        self.subscription = self.create_subscription(Odometry, odometry_topic, self._odometry_callback, 10)
+        self.publisher = self.create_publisher(NavPath, global_path_topic, 10)
+        self.get_logger().info(
+            f"Mode 1: subscribing {odometry_topic}, publishing {global_path_topic}; "
+            f"{transform.metadata()['pair_count']} pairs, RMSE {transform.rmse_m:.3f} m"
+        )
+
+    def _odometry_callback(self, message):
+        position = message.pose.pose.position
+        latitude, longitude = self.transform.slam_to_gps(position.x, position.y)
+        stamp = message.header.stamp.sec + message.header.stamp.nanosec / 1_000_000_000
+        payload = {
+            "available": True,
+            "latitude": latitude,
+            "longitude": longitude,
+            "slam": {"x": position.x, "y": position.y, "z": position.z},
+            "stamp": stamp,
+        }
+        with self._position_lock:
+            self._latest_position = payload
+
+    def latest_position(self):
+        with self._position_lock:
+            return dict(self._latest_position) if self._latest_position else {"available": False}
+
+    def publish_global_path(self, geographic_path):
+        message = NavPath()
+        message.header.stamp = self.get_clock().now().to_msg()
+        message.header.frame_id = self.slam_frame_id
+        slam_path = [self.transform.gps_to_slam(latitude, longitude) for latitude, longitude in geographic_path]
+        for index, (x, y) in enumerate(slam_path):
+            pose = PoseStamped()
+            pose.header = message.header
+            pose.pose.position.x = x
+            pose.pose.position.y = y
+            if len(slam_path) > 1:
+                next_x, next_y = slam_path[min(index + 1, len(slam_path) - 1)]
+                previous_x, previous_y = slam_path[max(index - 1, 0)]
+                yaw = math.atan2(next_y - previous_y, next_x - previous_x)
+                pose.pose.orientation.z = math.sin(yaw / 2)
+                pose.pose.orientation.w = math.cos(yaw / 2)
+            else:
+                pose.pose.orientation.w = 1.0
+            message.poses.append(pose)
+        self.publisher.publish(message)
+        return [[x, y] for x, y in slam_path]
 
 
 class OSMRoadNetwork:
@@ -210,6 +361,10 @@ class OSMRoadNetwork:
             "map_name": self.map_path.name,
             "default_display_mode": self.ui_config.get("default_display_mode", "compact"),
             "min_zoom_width": self.ui_config.get("min_zoom_width", DEFAULT_MIN_ZOOM_WIDTH),
+            "use_leaflet": self.ui_config.get("use_leaflet", True),
+            "mode": self.ui_config.get("mode", 0),
+            "global_path_topic": self.ui_config.get("global_path_topic", "/global_path"),
+            "transform": self.ui_config.get("transform"),
         }
 
     def _to_local(self, point):
@@ -315,7 +470,7 @@ def default_map_path():
     return Path(get_package_share_directory("lanelet2_maps")) / "res" / "map_galileo.osm"
 
 
-def make_handler(network, web_dir):
+def make_handler(network, web_dir, mode=0, ros_bridge=None):
     web_dir = web_dir.resolve()
 
     class Handler(BaseHTTPRequestHandler):
@@ -342,11 +497,25 @@ def make_handler(network, web_dir):
                 except ValueError as error:
                     self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
+            if request.path == "/api/robot_pose":
+                if mode != 1 or ros_bridge is None:
+                    self.send_json({"available": False, "mode": mode})
+                else:
+                    self.send_json(ros_bridge.latest_position())
+                return
             if request.path == "/api/route":
                 try:
                     query = parse_qs(request.query)
-                    start = (float(query["start_lat"][0]), float(query["start_lon"][0]))
                     goal = (float(query["goal_lat"][0]), float(query["goal_lon"][0]))
+                    if mode == 1:
+                        if ros_bridge is None:
+                            raise ValueError("mode 1 ROS bridge is unavailable")
+                        latest = ros_bridge.latest_position()
+                        if not latest.get("available"):
+                            raise ValueError("waiting for a message on the configured Odometry topic")
+                        start = (latest["latitude"], latest["longitude"])
+                    else:
+                        start = (float(query["start_lat"][0]), float(query["start_lon"][0]))
                     self.send_json(network.route(start, goal))
                 except (KeyError, ValueError) as error:
                     self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)

@@ -1,7 +1,7 @@
 galileo_osm_nav:
   ros__parameters:
     # Filename under lanelet2_maps/res, or an absolute OSM/XML path.
-    map_file: /home/dow/DOW/dinov3/lanelet2/src/galileo_osm_nav/maps/0924.osm
+    map_file: /home/dow/DOW/dinov3/lanelet2/src/galileo_osm_nav/maps/0924_3.osm
     host: 127.0.0.1
     port: 8090
 
@@ -25,3 +25,18 @@ galileo_osm_nav:
     # Web UI defaults. Smaller values permit deeper map zoom.
     default_display_mode: compact
     min_zoom_width: 2.0
+
+    # Satellite base map switch. false keeps the local OSM vector canvas only.
+    use_leaflet: true
+
+    # 0: freely select start/goal in the web UI; 1: start is read from Odometry.
+    mode: 0
+
+    # ROS interfaces used only when mode is 1.
+    odometry_topic: /Odometry
+    global_path_topic: /global_path
+    slam_frame_id: map
+
+    # Pair file for the SLAM (x,y, metres) <-> WGS-84 (latitude, longitude)
+    # affine least-squares transform.
+    paired_yaml: /home/dow/DOW/dinov3/lanelet2/src/galileo_osm_nav/config/paired.yaml

@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>galileo_osm_nav</name>
+  <version>0.1.0</version>
+  <description>Local web UI for OSM road-network visualization and shortest-path navigation.</description>
+  <maintainer email="maintainer@example.com">Lanelet2 user</maintainer>
+  <license>BSD-3-Clause</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <!-- Public Lanelet2 entry package; its internal modules stay encapsulated. -->
+  <exec_depend>lanelet2</exec_depend>
+  <exec_depend>lanelet2_maps</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

@@ -1,0 +1,27 @@
+galileo_osm_nav:
+  ros__parameters:
+    # Filename under lanelet2_maps/res, or an absolute OSM/XML path.
+    map_file: /home/dow/DOW/dinov3/lanelet2/src/galileo_osm_nav/maps/0924.osm
+    host: 127.0.0.1
+    port: 8090
+
+    # Machine-dog pedestrian-demo planning parameters.
+    robot_dog_speed_mps: 1.0
+    signal_wait_seconds: 20.0
+    safety_multipliers:
+      footway: 1.0
+      pedestrian: 1.0
+      path: 1.1
+      steps: 1.5
+      living_street: 1.2
+      service: 1.3
+      residential: 1.5
+      unclassified: 1.8
+      track: 1.8
+      tertiary: 2.5
+      secondary: 3.0
+      primary: 4.0
+
+    # Web UI defaults. Smaller values permit deeper map zoom.
+    default_display_mode: compact
+    min_zoom_width: 2.0

@@ -7,6 +7,7 @@ install(PROGRAMS
   scripts/galileo_osm_nav_server.py
   DESTINATION lib/${PROJECT_NAME}
 )
+install(FILES scripts/pcd_overlay.py DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY web config launch
   DESTINATION share/${PROJECT_NAME}
 )

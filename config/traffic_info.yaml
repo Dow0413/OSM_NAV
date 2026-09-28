@@ -1,0 +1,15 @@
+pedestrian:
+  max_speed_limit: false                       # 是否有限速
+  max_speed: /max_speed                        # 当前路线最大速度，在max_speed_limit: true下生效
+  traffic_signal_limit: true                   # 是否遵循交通信号灯
+  wait_traffic_signal: /wait_traffic_signal    # 当前是否在等待交通信号灯，在traffic_signal_limit: true下生效
+  
+  road_limit: true                             # 是否遵循 oneway 与 OSM 转向限制（restriction 关系）
+
+vehicle:
+  max_speed_limit: true                        # 是否有限速
+  max_speed: /max_speed                        # 当前路线最大速度，在max_speed_limit: true下生效
+  traffic_signal_limit: true                   # 是否遵循交通信号灯
+  wait_traffic_signal: /wait_traffic_signal    # 当前是否在等待交通信号灯，在traffic_signal_limit: true下生效
+  
+  road_limit: true                             # 是否遵循 oneway 与 OSM 转向限制（restriction 关系）

@@ -1,0 +1,31 @@
+# Coordinate pairs for mode: 1.
+#
+# world is the SLAM/map coordinate in metres: [x, y]
+# gps is the WGS-84 geographic coordinate in degrees: [latitude, longitude]
+#
+# Enter at least three non-collinear, accurately surveyed pairs. Four or more
+# pairs are recommended because the affine transform is fitted by least squares.
+pairs:
+  - id: "p0"
+    world: [-16.157716255, 40.093326545]
+    gps: [30.326777039, 120.059275821]
+
+  - id: "p1"
+    world: [5.410813229, 34.152214057]
+    gps: [30.326723447, 120.059500098]
+
+  - id: "p2"
+    world: [-7.710025378, -3.827804205]
+    gps: [30.326380847, 120.059363663]
+
+  - id: "p3"
+    world: [-28.549496501, 1.238858827]
+    gps: [30.326426551, 120.059146967]
+
+  - id: "p4"
+    world: [80.486513962, 14.361254453]
+    gps: [30.326544922, 120.060280761]
+
+  - id: "p5"
+    world: [38.140157782, -9.433681506]
+    gps: [30.326330279, 120.059840429]

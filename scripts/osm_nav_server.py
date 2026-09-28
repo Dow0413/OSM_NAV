@@ -23,7 +23,7 @@ from geometry_msgs.msg import PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path as NavPath
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import Int8
+from std_msgs.msg import Bool, Float32, Int8
 import yaml
 
 # Keep algorithm modules discoverable in both layouts: ``scripts/../src`` in
@@ -34,7 +34,7 @@ for module_root in (SCRIPT_DIR / "src", SCRIPT_DIR.parent / "src"):
         sys.path.insert(0, str(module_root))
 
 from roading import OSMRoadNetwork
-from traffic_rules import load_topo_setting
+from traffic_rules import TrafficRules, load_topo_setting, load_traffic_info
 
 from pcd_overlay import PcdOverlay
 
@@ -153,13 +153,14 @@ class RosNavigationBridge(Node):
     """Mode-1 ROS bridge: Odometry -> GPS and GPS route -> nav_msgs/Path."""
 
     def __init__(self, transform, network, odometry_topic, global_path_topic, slam_frame_id,
-                 stop_nav_topic, stop_override_topic, signal_stop_distance_m):
+                 stop_nav_topic, stop_override_topic, signal_stop_distance_m, traffic_info):
         super().__init__("osm_nav_bridge")
         self.transform = transform
         self.network = network
         self.slam_frame_id = slam_frame_id
         self.global_path_topic = global_path_topic
         self.signal_stop_distance_m = signal_stop_distance_m
+        self.traffic_info = traffic_info
         self._position_lock = threading.Lock()
         self._latest_position = None
         self._route_points = []
@@ -170,6 +171,10 @@ class RosNavigationBridge(Node):
         self.publisher = self.create_publisher(NavPath, global_path_topic, 10)
         self.stop_publisher = self.create_publisher(Int8, stop_nav_topic, 10)
         self.zero_override_publisher = self.create_publisher(Twist, stop_override_topic, 10)
+        self.max_speed_publisher = (self.create_publisher(Float32, traffic_info["max_speed"], 10)
+                                    if traffic_info["max_speed_limit"] else None)
+        self.wait_signal_publisher = (self.create_publisher(Bool, traffic_info["wait_traffic_signal"], 10)
+                                      if traffic_info["traffic_signal_limit"] else None)
         self.create_subscription(NavPath, global_path_topic, self._path_callback, 10)
         self.create_timer(0.05, self._signal_timer)
         self.get_logger().info(
@@ -229,6 +234,8 @@ class RosNavigationBridge(Node):
 
         with self._position_lock:
             self._holding_signal_id = holding
+        if self.wait_signal_publisher is not None:
+            self.wait_signal_publisher.publish(Bool(data=bool(holding)))
         if holding:
             # /stop has other publishers that continuously send 0. The CMU mux
             # high-priority zero channel makes the red-light hold deterministic.
@@ -268,7 +275,9 @@ class RosNavigationBridge(Node):
         with self._position_lock:
             return dict(self._latest_position) if self._latest_position else {"available": False}
 
-    def publish_global_path(self, geographic_path, crossing_events):
+    def publish_global_path(self, route):
+        geographic_path = route["path"]
+        crossing_events = route["crossing_events"]
         message = NavPath()
         message.header.stamp = self.get_clock().now().to_msg()
         message.header.frame_id = self.slam_frame_id
@@ -301,6 +310,8 @@ class RosNavigationBridge(Node):
                 pose.pose.orientation.w = 1.0
             message.poses.append(pose)
         self.publisher.publish(message)
+        if self.max_speed_publisher is not None:
+            self.max_speed_publisher.publish(Float32(data=float(route["speed_limit_mps"])))
         return [[x, y] for x, y in slam_path]
 
 
@@ -461,11 +472,94 @@ class OSMMapEditor:
             temporary.replace(self.map_path)
         return {"updated_nodes": len(updates), "backup": backup.name, "restart_required": True}
 
+class OSMRuleEditor:
+    """Edit per-way regulatory tags and OSM turn-restriction relations."""
+    def __init__(self, map_path):
+        self.map_path = Path(map_path).resolve()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _tags(element):
+        return {tag.attrib.get("k"): tag.attrib.get("v") for tag in element.findall("tag")}
+
+    @staticmethod
+    def _set_tag(element, key, value):
+        tag = next((tag for tag in element.findall("tag") if tag.attrib.get("k") == key), None)
+        if value:
+            if tag is None:
+                tag = ET.SubElement(element, "tag", k=key, v=value)
+            else:
+                tag.set("v", value)
+        elif tag is not None:
+            element.remove(tag)
+
+    def data(self):
+        root = ET.parse(self.map_path).getroot()
+        roads=[]
+        for way in root.findall("way"):
+            tags=self._tags(way); kind=tags.get("highway")
+            if not kind: continue
+            roads.append({"id": way.attrib["id"], "name": tags.get("name", ""), "kind": kind,
+                          "nodes": [nd.attrib["ref"] for nd in way.findall("nd")],
+                          "maxspeed": tags.get("maxspeed", ""), "oneway": tags.get("oneway", "no"),
+                          "traffic_signals": tags.get("traffic_signals") in {"yes", "signal"}})
+        restrictions=[]
+        for relation in root.findall("relation"):
+            tags=self._tags(relation)
+            if tags.get("type") != "restriction": continue
+            members={member.attrib.get("role"): member.attrib.get("ref") for member in relation.findall("member")}
+            restrictions.append({"id": relation.attrib.get("id", ""), "from": members.get("from", ""),
+                                 "via": members.get("via", ""), "to": members.get("to", ""),
+                                 "restriction": tags.get("restriction", "")})
+        return {"roads": roads, "restrictions": restrictions}
+
+    def _write(self, tree):
+        stamp=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup=self.map_path.with_name(f"{self.map_path.stem}.{stamp}.bak{self.map_path.suffix}")
+        suffix=1
+        while backup.exists():
+            backup=self.map_path.with_name(f"{self.map_path.stem}.{stamp}.{suffix}.bak{self.map_path.suffix}"); suffix+=1
+        shutil.copy2(self.map_path, backup)
+        ET.indent(tree, space="  ")
+        temporary=self.map_path.with_suffix(self.map_path.suffix+".tmp")
+        tree.write(temporary, encoding="utf-8", xml_declaration=True)
+        temporary.replace(self.map_path)
+        return backup.name
+
+    def save_road(self, payload):
+        road_id=str(payload.get("id", "")); maxspeed=str(payload.get("maxspeed", "")).strip()
+        oneway=str(payload.get("oneway", "no")); signal=bool(payload.get("traffic_signals", False))
+        if oneway not in {"no", "yes", "-1"}: raise ValueError("oneway must be no, yes, or -1")
+        if maxspeed and not __import__('re').fullmatch(r"\d+(?:\.\d+)?(?:\s*(?:km/h|kph|kmh|mph))?", maxspeed, __import__('re').I):
+            raise ValueError("maxspeed must be a number, optionally followed by km/h or mph")
+        with self._lock:
+            tree=ET.parse(self.map_path); way=next((w for w in tree.getroot().findall("way") if w.attrib.get("id")==road_id),None)
+            if way is None or not self._tags(way).get("highway"): raise ValueError(f"unknown road: {road_id}")
+            self._set_tag(way,"maxspeed",maxspeed); self._set_tag(way,"oneway",None if oneway=="no" else oneway)
+            self._set_tag(way,"traffic_signals","yes" if signal else None)
+            backup=self._write(tree)
+        return {"road_id":road_id,"backup":backup,"restart_required":True}
+
+    def add_turn_restriction(self, payload):
+        from_id,to_id,via_id=(str(payload.get(key,"")) for key in ("from","to","via"))
+        restriction=str(payload.get("restriction", ""))
+        if restriction not in {"no_left_turn","no_right_turn","no_u_turn","only_straight_on"}: raise ValueError("unsupported turn restriction")
+        with self._lock:
+            tree=ET.parse(self.map_path); root=tree.getroot()
+            ways={way.attrib.get("id") for way in root.findall("way")}; nodes={node.attrib.get("id") for node in root.findall("node")}
+            if from_id not in ways or to_id not in ways or via_id not in nodes: raise ValueError("from/to road or via node does not exist")
+            used=[int(r.attrib["id"]) for r in root.findall("relation") if r.attrib.get("id","").lstrip("-").isdigit()]
+            relation=ET.SubElement(root,"relation",id=str(min(used+[0])-1),visible="true")
+            ET.SubElement(relation,"member",type="way",ref=from_id,role="from"); ET.SubElement(relation,"member",type="node",ref=via_id,role="via"); ET.SubElement(relation,"member",type="way",ref=to_id,role="to")
+            ET.SubElement(relation,"tag",k="type",v="restriction"); ET.SubElement(relation,"tag",k="restriction",v=restriction)
+            backup=self._write(tree)
+        return {"backup":backup,"restart_required":True}
+
 def default_map_path():
     return Path(get_package_share_directory("osm_nav")) / "maps" / "0924_4.osm"
 
 
-def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, map_editor=None):
+def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, map_editor=None, rule_editor=None):
     web_dir = web_dir.resolve()
 
     class Handler(BaseHTTPRequestHandler):
@@ -489,6 +583,13 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
                 try:
                     detail = parse_qs(request.query).get("detail", ["compact"])[0]
                     self.send_bytes(network.map_json(detail), "application/json; charset=utf-8")
+                except ValueError as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
+            if request.path == "/api/rules/roads":
+                try:
+                    if rule_editor is None: raise ValueError("rule editor is unavailable")
+                    self.send_json(rule_editor.data())
                 except ValueError as error:
                     self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
@@ -543,7 +644,7 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
                         start = (float(query["start_lat"][0]), float(query["start_lon"][0]))
                     route = network.route(start, goal)
                     if mode == 1:
-                        route["slam_path"] = ros_bridge.publish_global_path(route["path"], route["crossing_events"])
+                        route["slam_path"] = ros_bridge.publish_global_path(route)
                         route["global_path_topic"] = ros_bridge.global_path_topic
                         route["start_source"] = "odometry"
                     self.send_json(route)
@@ -569,6 +670,18 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
 
         def do_POST(self):
             request = urlparse(self.path)
+            if request.path in {"/api/rules/save-road", "/api/rules/add-turn-restriction"}:
+                try:
+                    if rule_editor is None: raise ValueError("rule editor is unavailable")
+                    content_length=int(self.headers.get("Content-Length","0"))
+                    if not 0 < content_length <= 100_000: raise ValueError("rule request body must be between 1 and 100000 bytes")
+                    payload=json.loads(self.rfile.read(content_length))
+                    if not isinstance(payload,dict): raise ValueError("rule request must be a JSON object")
+                    result=rule_editor.save_road(payload) if request.path.endswith("save-road") else rule_editor.add_turn_restriction(payload)
+                    self.send_json(result)
+                except (ValueError, json.JSONDecodeError) as error:
+                    self.send_json({"error":str(error)},HTTPStatus.BAD_REQUEST)
+                return
             if request.path == "/api/editor/export-pairs":
                 try:
                     if map_editor is None:
@@ -631,7 +744,9 @@ def main():
                         help="Scenario profile YAML (topo_setting.yaml)")
     # Keep the spelling aligned with the existing osm_nav.yaml parameter.
     parser.add_argument("--topo-setting-chose", required=True,
-                        help="Selected scene name, for example walk or car")
+                        help="Selected topology scene name")
+    parser.add_argument("--traffic-info-yaml", type=Path, required=True,
+                        help="Generic traffic rule switches and ROS topic YAML")
     parser.add_argument("--default-display-mode", choices=("compact", "full"), default="compact")
     parser.add_argument("--min-zoom-width", type=float, default=DEFAULT_MIN_ZOOM_WIDTH)
     parser.add_argument("--use-base-map", choices=("openstreetmap", "esri_satellite", "none"), default="esri_satellite")
@@ -655,6 +770,8 @@ def main():
         parser.error("minimum zoom width and signal stop distance must be positive")
     try:
         topo_setting = load_topo_setting(args.topo_setting_yaml, args.topo_setting_chose)
+        traffic_info = load_traffic_info(args.traffic_info_yaml, topo_setting["traffic_info_chose"])
+        traffic_rules = TrafficRules(traffic_info)
     except ValueError as error:
         parser.error(f"invalid topology setting: {error}")
     server = None
@@ -672,10 +789,13 @@ def main():
             "topo_setting": {
                 "name": topo_setting["name"],
                 "speed_mps": topo_setting["speed_mps"],
+                "traffic_info_chose": topo_setting["traffic_info_chose"],
+                "traffic_info": traffic_info,
                 "allowed_road_types": sorted(topo_setting["allowed_road_types"]),
             },
         },
         allowed_road_types=topo_setting["allowed_road_types"],
+        traffic_rules=traffic_rules,
     )
     pcd_overlay = None
     if args.pcd_overlay:
@@ -700,7 +820,7 @@ def main():
         rclpy.init(args=None)
         ros_bridge = RosNavigationBridge(
             transform, network, args.odometry_topic, args.global_path_topic, args.slam_frame_id,
-            args.stop_nav, args.stop_override_topic, args.signal_stop_distance_m,
+            args.stop_nav, args.stop_override_topic, args.signal_stop_distance_m, traffic_info,
         )
         ros_executor = MultiThreadedExecutor()
         ros_executor.add_node(ros_bridge)
@@ -711,15 +831,15 @@ def main():
     network.ui_config["transform"] = transform_metadata
     try:
         server = ThreadingHTTPServer(
-            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map, args.pair_files_dir))
+            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map, args.pair_files_dir), OSMRuleEditor(args.map))
         )
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             parser.error(f"port {args.port} is already in use; close the existing server or choose --port <number>")
         raise
     print(f"Map: {args.map}")
-    print(f"Topology setting: {topo_setting['name']} (speed {topo_setting['speed_mps']} m/s; "
-          f"roads: {', '.join(sorted(topo_setting['allowed_road_types']))})")
+    print(f"Topology setting: {topo_setting['name']} (traffic info: {traffic_info['name']}; "
+          f"speed {topo_setting['speed_mps']} m/s; roads: {', '.join(sorted(topo_setting['allowed_road_types']))})")
     print(f"Open http://{args.host}:{args.port}")
     try:
         server.serve_forever()

@@ -5,7 +5,7 @@ import math
 
 import yaml
 
-from .pedestrian_rules import DEFAULT_SIGNAL_WAIT_SECONDS
+from .general_rules import DEFAULT_SIGNAL_WAIT_SECONDS
 
 
 def load_topo_setting(setting_yaml, choice):
@@ -30,6 +30,9 @@ def load_topo_setting(setting_yaml, choice):
     profile = document[choice]
     if not isinstance(profile, dict):
         raise ValueError(f"topology setting '{choice}' must be a mapping")
+    info_choice = profile.get("traffic_info_chose")
+    if not isinstance(info_choice, str) or not info_choice.strip():
+        raise ValueError(f"topology setting '{choice}' requires traffic_info_chose")
     try:
         speed_mps = float(profile["speed_mps"])
     except (KeyError, TypeError, ValueError) as error:
@@ -53,6 +56,7 @@ def load_topo_setting(setting_yaml, choice):
         raise ValueError(f"topology setting '{choice}'.signal_wait_seconds cannot be negative")
     return {
         "name": str(choice),
+        "traffic_info_chose": info_choice,
         "speed_mps": speed_mps,
         "safety_multipliers": multipliers,
         "allowed_road_types": frozenset(multipliers),

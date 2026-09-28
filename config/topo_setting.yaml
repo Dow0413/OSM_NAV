@@ -14,9 +14,11 @@
 # secondary: 1.0      # 二级道路
 # primary: 1.0        # 主干道
 #
+# traffic_info_chose 选择 traffic_info.yaml 中的规则开关与 ROS2 话题；walk 与 x1w 同用 pedestrian。
 # speed_mps 为规划时采用的速度。
 
 walk:
+  traffic_info_chose: pedestrian
   speed_mps: 1.0
   safety_multipliers:
     footway: 1.0        # 人行道；最低代价，优先通行
@@ -30,6 +32,7 @@ walk:
     track: 1.0          # 乡间、林业或农业便道；路况通常较差
 
 x1w:
+  traffic_info_chose: pedestrian
   speed_mps: 1.0
   safety_multipliers:
     footway: 1.0        # 人行道；最低代价，优先通行
@@ -46,6 +49,7 @@ x1w:
     primary: 1.0        # 主干道
 
 car:
+  traffic_info_chose: vehicle
   speed_mps: 9.0
   safety_multipliers:
     path: 1.0           # 通用小径；略低于人行道的优先级

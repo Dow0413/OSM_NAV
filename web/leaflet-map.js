@@ -78,6 +78,8 @@ let pcdMetadata = null;
 let pcdOverlayLayer = null;
 let pcdBuildingData = [];
 let designCategory = null;
+let ruleDesignActive = false;
+let selectRuleRoad = null;
 
 function updateStatus(text) {
   statusBox.textContent = text;
@@ -142,9 +144,12 @@ function drawRoad(road) {
   if (!layerSettings.roads || road.coordinates.length < 2) return;
   const [color, width] = roadStyle[road.kind] || ['#fff', 2];
   const dashArray = ['footway', 'path', 'pedestrian', 'cycleway'].includes(road.kind) ? '4 3' : undefined;
-  L.polyline(road.coordinates, {renderer: vectorRenderer, color: '#aa9f93', weight: scaled(width + 1.25, 'road'), dashArray, interactive: false}).addTo(layers.roads);
+  const selectable = ruleDesignActive && typeof selectRuleRoad === 'function';
+  const selectRoad = event => { if (!selectable) return; L.DomEvent.stopPropagation(event.originalEvent); selectRuleRoad(String(road.id)); };
+  const outline = L.polyline(road.coordinates, {renderer: vectorRenderer, color: '#aa9f93', weight: scaled(width + 1.25, 'road'), dashArray, interactive: selectable}).addTo(layers.roads);
   const directionCoordinates = road.oneway === '-1' ? [...road.coordinates].reverse() : road.coordinates;
-  L.polyline(directionCoordinates, {renderer: vectorRenderer, color, weight: scaled(width, 'road'), dashArray, interactive: false}).addTo(layers.roads);
+  const line = L.polyline(directionCoordinates, {renderer: vectorRenderer, color, weight: scaled(width, 'road'), dashArray, interactive: selectable}).addTo(layers.roads);
+  if (selectable) { outline.on('click', selectRoad); line.on('click', selectRoad); }
   if (['yes', '-1'].includes(road.oneway)) addDirectionArrow(directionCoordinates);
   if (road.name && road.kind !== 'footway') addLabel(road.name, directionCoordinates[Math.floor(directionCoordinates.length / 2)], true);
 }
@@ -166,7 +171,7 @@ function drawSignalMarkers() {
   for (const signal of signalData) {
     L.circleMarker([signal.latitude, signal.longitude], {
       renderer: vectorRenderer,
-      radius: scaled(signal.controls_pedestrian_crossing ? 5 : 3, 'signal'),
+      radius: scaled(signal.controls_active_profile ? 5 : 3, 'signal'),
       color: '#fff', fillColor: signal.state === 1 ? '#ce4d47' : '#28965e',
       fillOpacity: 1, weight: scaled(1.3, 'signal'), interactive: false,
     }).addTo(layers.signals);
@@ -261,9 +266,9 @@ function updateSignalPanel() {
   const list = document.getElementById('signal-list');
   list.innerHTML = signalData.length ? signalData.map(signal => `
     <div class="signal-item">
-      <div class="signal-name"><b>${escapeHtml(signal.id)}</b><small>${signal.controls_pedestrian_crossing ? '参与当前规划的步行过街信号' : '仅地图显示，不参与当前规划'}</small></div>
+      <div class="signal-name"><b>${escapeHtml(signal.id)}</b><small>${signal.controls_active_profile ? '参与当前规则族的受控信号' : '仅地图显示，不参与当前规划'}</small></div>
       <button type="button" class="${signal.state === 1 ? 'red' : 'green'}" data-signal-id="${escapeHtml(signal.id)}">${signal.state === 1 ? '1 红灯' : '0 绿灯'}</button>
-    </div>`).join('') : '<p class="signal-note">当前 OSM 没有关联步行过街的交通信号灯。</p>';
+    </div>`).join('') : '<p class="signal-note">当前 OSM 没有交通信号灯。</p>';
   const display = document.getElementById('signal-runtime-status');
   if (Number(uiConfig.mode) !== 1) {
     display.textContent = '当前是自由规划模式：可演示切换灯色；机器狗自动停车需 mode=1。';
@@ -406,6 +411,7 @@ function renderMap() {
   (mapData.roads || []).forEach(drawRoad);
   drawPoints();
   drawDesignHighlight();
+  window.redrawRuleHighlights?.();
   drawRoute();
   drawEndpoints();
   drawPcdBuildings();
@@ -473,6 +479,7 @@ function resetSelection() {
 }
 
 function choosePoint(latlng) {
+  if (ruleDesignActive) { updateStatus('规则设计模式：请直接点击道路选择，不会设置起点或终点。'); return; }
   const point = [latlng.lat, latlng.lng];
   if (Number(uiConfig.mode) === 1) {
     goal = point;
@@ -671,3 +678,31 @@ async function initialize() {
 }
 
 initialize();
+
+// OSM per-way regulatory editor. In this mode map clicks select roads, never endpoints.
+(() => {
+  const select = document.getElementById('rule-road-select');
+  if (!select) return;
+  const maxspeed = document.getElementById('rule-maxspeed'), oneway = document.getElementById('rule-oneway'), signal = document.getElementById('rule-signal');
+  const via = document.getElementById('rule-via'), to = document.getElementById('rule-to'), turn = document.getElementById('rule-turn'), status = document.getElementById('rule-design-status');
+  let roads = [], ownHighlights = [];
+  const label = road => `${road.name || '未命名道路'} · ${road.kind} · #${road.id}`;
+  const selected = () => roads.find(road => road.id === select.value);
+  const show = message => { status.textContent = message; };
+  const removeHighlights = () => { ownHighlights.forEach(layer => layers.highlights.removeLayer(layer)); ownHighlights = []; };
+  const displayRoad = id => (mapData?.roads || []).find(road => String(road.id) === String(id));
+  const addRoadHighlight = (id, color, weight) => { const road = displayRoad(id); if (road?.coordinates) ownHighlights.push(L.polyline(road.coordinates, {renderer:vectorRenderer, color, weight, opacity:.95, interactive:false}).addTo(layers.highlights)); };
+  function allowedEndpoints(road) { return road.oneway === 'yes' ? [road.nodes.at(-1)] : road.oneway === '-1' ? [road.nodes[0]] : [road.nodes[0], road.nodes.at(-1)]; }
+  function canLeaveAt(road, nodeId) { return road.oneway === 'yes' ? road.nodes[0] === nodeId : road.oneway === '-1' ? road.nodes.at(-1) === nodeId : road.nodes[0] === nodeId || road.nodes.at(-1) === nodeId; }
+  function redrawHighlights() { removeHighlights(); if (!ruleDesignActive) return; const road=selected(); if (!road) return; addRoadHighlight(road.id,'#d94b42',7); if(to.value) addRoadHighlight(to.value,'#f0a62d',6); for(const item of signalData.filter(item=>road.nodes.includes(String(item.id)))) ownHighlights.push(L.circleMarker([item.latitude,item.longitude],{renderer:vectorRenderer,radius:8,color:'#fff',fillColor:'#34c77b',fillOpacity:1,weight:3,interactive:false}).addTo(layers.highlights)); }
+  function updateTargets() { const road=selected(), nodeId=via.value; if(!road||!nodeId)return; const candidates=roads.filter(item=>item.id!==road.id&&item.nodes.includes(nodeId)&&canLeaveAt(item,nodeId)); to.innerHTML=candidates.length?candidates.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(label(item))}</option>`).join(''):'<option value="">该路口没有可前往的道路</option>'; redrawHighlights(); }
+  function applyRoad(fit=true) { const road=selected(); if(!road)return; maxspeed.value=road.maxspeed||''; oneway.value=['yes','-1'].includes(road.oneway)?road.oneway:'no'; signal.checked=road.traffic_signals; via.innerHTML=allowedEndpoints(road).map(id=>`<option value="${escapeHtml(id)}">路口节点 ${escapeHtml(id)}</option>`).join(''); updateTargets(); if(fit){const display=displayRoad(road.id);if(display?.coordinates)map.fitBounds(L.latLngBounds(display.coordinates),{padding:[35,35],maxZoom:20});} }
+  selectRuleRoad = id => { if(!ruleDesignActive)return; select.value=String(id); applyRoad(true); show(`已从地图选中：${label(selected())}。红色为当前道路，橙色为可前往的目标道路，绿色为关联信号灯。`); };
+  window.redrawRuleHighlights = redrawHighlights;
+  async function loadRules() { try { const response=await fetch('/api/rules/roads'); const data=await response.json(); if(!response.ok)throw new Error(data.error||response.statusText); roads=data.roads; select.innerHTML=roads.map(road=>`<option value="${escapeHtml(road.id)}">${escapeHtml(label(road))}</option>`).join(''); applyRoad(false); show(`已加载 ${roads.length} 条道路；进入规则设计后可直接在地图点击道路。`); } catch(error) { show(`读取规则失败：${error.message}`); } }
+  select.addEventListener('change',()=>applyRoad(true)); via.addEventListener('change',updateTargets); to.addEventListener('change',redrawHighlights);
+  document.getElementById('rule-save-road').addEventListener('click',async()=>{const road=selected();if(!road)return;try{const response=await fetch('/api/rules/save-road',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:road.id,maxspeed:maxspeed.value,oneway:oneway.value,traffic_signals:signal.checked})});const data=await response.json();if(!response.ok)throw new Error(data.error||response.statusText);show(`道路规则已保存；备份：${data.backup}。请重启服务使规划生效。`);await loadRules();}catch(error){show(`保存失败：${error.message}`);}});
+  document.getElementById('rule-save-turn').addEventListener('click',async()=>{const road=selected();if(!road||!to.value)return;try{const response=await fetch('/api/rules/add-turn-restriction',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from:road.id,via:via.value,to:to.value,restriction:turn.value})});const data=await response.json();if(!response.ok)throw new Error(data.error||response.statusText);show(`转向限制已新增；备份：${data.backup}。请重启服务使规划生效。`);}catch(error){show(`新增失败：${error.message}`);}});
+  window.addEventListener('osm-nav-menu-change',event=>{ruleDesignActive=event.detail.target==='rule-design'; if(ruleDesignActive){layerSettings.roads=true;document.querySelector('[data-layer="roads"]').checked=true;start=null;goal=null;lastRoute=null;navigate.disabled=true;renderMap();applyRoad(false);updateStatus('规则设计模式：请直接点击道路选择，不会设置起点或终点。');}else{removeHighlights();renderMap();}});
+  loadRules();
+})();

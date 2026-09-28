@@ -9,6 +9,8 @@ osm_nav:
     topo_setting_yaml: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/config/topo_setting.yaml
     topo_setting_chose: x1w
 
+    traffic_info_yaml: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/config/traffic_info.yaml
+
     # Web UI defaults. Smaller values permit deeper map zoom.
     default_display_mode: compact
     min_zoom_width: 2.0
@@ -49,4 +51,4 @@ osm_nav:
 
       # Pair file for the SLAM (x,y, metres) <-> WGS-84 (latitude, longitude)
       # affine least-squares transform.
-      paired_yaml: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/pair_files/paired.yaml
+      paired_yaml: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/pair_files/paired_20260928T091722Z.yaml

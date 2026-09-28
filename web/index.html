@@ -38,7 +38,7 @@
     main { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); }
     .sidebar { display: grid; grid-template-columns: 60px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 0 10px; }
     .sidebar > .panel { grid-column: 2; min-width: 0; }
-    .side-nav { grid-column: 1; grid-row: 1 / span 6; position: sticky; top: 0; display: grid; align-content: start; gap: 8px; padding: 4px 0; }
+    .side-nav { grid-column: 1; grid-row: 1 / span 7; position: sticky; top: 0; display: grid; align-content: start; gap: 8px; padding: 4px 0; }
     .side-nav button { width: 52px; min-height: 52px; display: grid; place-items: center; gap: 2px; padding: 5px 2px; border: 1px solid #cddde3; border-radius: 11px; background: #f8fbfc; color: #52707e; font: inherit; cursor: pointer; }
     .side-nav button:hover { background: #eaf5f8; } .side-nav button.active { background: #167294; border-color: #167294; color: #fff; box-shadow: 0 4px 12px #16729440; }
     .side-nav .menu-icon { font-size: 19px; line-height: 1; } .side-nav .menu-label { font-size: 10px; line-height: 1.15; }
@@ -77,6 +77,7 @@
       <button type="button" data-menu-target="rules" aria-label="交通规则" title="交通规则"><span class="menu-icon">⚖</span><span class="menu-label">规则</span></button>
       <button type="button" data-menu-target="design" aria-label="类别显示" title="类别显示"><span class="menu-icon">⌘</span><span class="menu-label">类别</span></button>
       <button type="button" data-menu-target="pcd" aria-label="点云显示" title="点云显示"><span class="menu-icon">◌</span><span class="menu-label">点云</span></button>
+      <button type="button" data-menu-target="rule-design" aria-label="规则设计" title="规则设计"><span class="menu-icon">⚙</span><span class="menu-label">规则设计</span></button>
     </nav>
     <details class="panel menu-active" data-menu-panel="display" open><summary><h2>显示设置</h2></summary><div class="panel-content">
       <div class="setting"><label>鼠标当前位置</label><div id="hover-coordinate" class="coordinate-readout">纬度：--<br>经度：--</div></div>
@@ -95,8 +96,8 @@
       <div class="setting"><label>地图内容 <output id="map-detail-value">简略显示</output></label><div class="mode-toggle"><button id="compact-mode" class="active" type="button">简略显示</button><button id="full-mode" type="button">全部显示</button></div><small>简略模式只加载道路折线；全部模式加载节点、名称、建筑、区域和信号点，较大地图可能卡顿。</small></div>
     </div></details>
     <details class="panel" data-menu-panel="navigation"><summary><h2>导航控制</h2></summary><div class="panel-content"><div id="status" class="status">正在加载地图…</div><ol class="steps"><li>在地图任意位置点击设置起点</li><li>再次点击设置终点</li><li>点击“开启导航”</li></ol><button id="navigate" class="action" disabled>开启导航</button><button id="reset" class="action secondary">重新选择起终点</button></div></details>
-    <details class="panel rule-panel" data-menu-panel="rules"><summary><h2>机器狗基础通行规则</h2></summary><div class="rule-content"><div class="rule"><span class="rule-dot"></span><div><b>步行设施优先</b><br>优先使用人行道、步行街、小径和过街设施；共享道路会增加安全代价，只有没有更好连接时才优先级较低地使用。</div></div><div class="rule"><span class="rule-dot"></span><div><b>禁行与专用路</b><br>排除 <code>foot=no</code>、<code>foot=use_sidepath</code>、<code>access=no</code>、<code>access=private</code>，且不进入高速和快速道路。</div></div><div class="rule"><span class="rule-dot"></span><div><b>道路方向</b><br>在人行道、步行道上双向通行，除非有 <code>oneway:foot</code>；在共享机动车道路上遵守 OSM 的 <code>oneway</code> 方向，避免逆向通行。</div></div><div class="rule"><span class="rule-dot"></span><div><b>交通信号与过街</b><br>红灯（1）在进入有交通信号的步行过街路段前等待；绿灯（0）恢复原路径。仅关联步行类路段的信号灯参与停车。</div></div><div class="rule warn"><span class="rule-dot"></span><div><b>演示边界</b><br>灯色由网页手动设置；后续可替换为视觉识别。真实运行仍需验证定位、制动距离和现场交通条件。</div></div></div></details>
-    <details class="panel" data-menu-panel="traffic"><summary><h2>模拟交通信号灯</h2></summary><div class="panel-content"><p class="signal-note">仅显示关联步行过街的信号灯。逐灯切换：1 为红灯、0 为绿灯，默认红灯。</p><div id="signal-runtime-status">正在读取信号灯…</div><div id="signal-list"></div></div></details>
+    <details class="panel rule-panel" data-menu-panel="rules"><summary><h2>当前交通规则</h2></summary><div class="rule-content"><div class="rule"><span class="rule-dot"></span><div><b>拓扑决定通行</b><br>topo_setting 中列出的道路类别构成唯一可规划道路集合；交通规则不再重复筛选道路类型。</div></div><div class="rule"><span class="rule-dot"></span><div><b>traffic_info 开关</b><br>当前 topo 场景通过 <code>traffic_info_chose</code> 读取限速、交通信号灯与道路规则的启用状态及 ROS2 发布话题。<code>road_limit: true</code> 时同时遵循 <code>oneway</code> 和 OSM 转向限制。</div></div><div class="rule"><span class="rule-dot"></span><div><b>规则设计</b><br>可在“规则设计”中编辑道路的 <code>maxspeed</code>、<code>traffic_signals</code>、<code>oneway</code> 和转向限制；保存后需重启服务。</div></div><div class="rule warn"><span class="rule-dot"></span><div><b>演示边界</b><br>灯色由网页手动设置；真实运行仍需验证定位、制动距离、信号识别和现场交通条件。</div></div></div></details>
+    <details class="panel" data-menu-panel="traffic"><summary><h2>模拟交通信号灯</h2></summary><div class="panel-content"><p class="signal-note">显示全部 OSM 信号灯。较大的点表示受当前规则族控制；逐灯切换：1 为红灯、0 为绿灯，默认红灯。</p><div id="signal-runtime-status">正在读取信号灯…</div><div id="signal-list"></div></div></details>
     <details class="panel" data-menu-panel="design"><summary><h2>类别显示</h2></summary><div class="panel-content">
       <p class="design-note">选择类别后，地图会用红色高亮该类别。建筑、区域和信号点需要“全部显示”地图数据，会自动加载。</p>
       <section class="category-section"><h3>线路道路</h3><div id="design-road-list" class="design-list" aria-label="道路类别高亮"></div></section>
@@ -104,6 +105,7 @@
       <button id="design-clear" class="action secondary" type="button">清除高亮</button>
     </div></details>
     <details class="panel" data-menu-panel="pcd"><summary><h2>点云与 OSM 建筑对齐</h2></summary><div class="panel-content"><p class="signal-note">将 PCD 俯视投影（青色）叠到底图上，与 OSM 建筑轮廓（橙色）比较。此图层只用于检查，不参与路径规划。</p><label class="pcd-check"><input id="pcd-visible" type="checkbox">显示 PCD 点云投影</label><label class="pcd-check"><input id="pcd-buildings" type="checkbox" checked>显示 OSM 建筑轮廓</label><label class="pcd-control">点云坐标解释<select id="pcd-frame"><option value="raw">原始 XY 已是 ENU</option><option value="aligned">PCD 应用 t_align 后为 ENU</option><option value="inverse">PCD 应用 t_align 逆变换后为 ENU</option></select></label><label class="pcd-control">显示点<select id="pcd-height"><option value="high">高度 z ≥ 3 m（突出建筑）</option><option value="all">全部点（包含地面）</option></select></label><label class="pcd-control">点云透明度 <output id="pcd-opacity-value">65%</output><input id="pcd-opacity" type="range" min="0" max="100" value="65"></label><button id="pcd-fit" class="action secondary" type="button">缩放到点云范围</button><a class="action editor-link" href="pcd_editor.html">打开 3D PCD / OSM 校图</a><div id="pcd-info">正在检查 PCD 地图…</div></div></details>
+    <details class="panel" data-menu-panel="rule-design"><summary><h2>规则设计</h2></summary><div class="panel-content"><p class="signal-note">进入本菜单后，直接点击地图中的道路即可选中，不会设置起点或终点。红色为当前道路，橙色为选定的可前往目标道路，绿色为该道路关联的信号灯。保存会备份原地图；重启后才会重建规划图。</p><label class="pcd-control">道路<select id="rule-road-select"><option>正在读取道路…</option></select></label><label class="pcd-control">限速 maxspeed（留空表示不设）<input id="rule-maxspeed" placeholder="例如 30 或 30 km/h"></label><label class="pcd-control">道路方向<select id="rule-oneway"><option value="no">双向 / 不设 oneway</option><option value="yes">单向：节点顺序方向</option><option value="-1">单向：节点逆序方向</option></select></label><label class="pcd-check"><input id="rule-signal" type="checkbox">此道路受交通信号控制</label><button id="rule-save-road" class="action" type="button">备份并保存道路规则</button><div class="category-section"><h3>新增转向限制</h3><label class="pcd-control">经由路口节点<select id="rule-via"></select></label><label class="pcd-control">目标道路<select id="rule-to"></select></label><label class="pcd-control">限制类型<select id="rule-turn"><option value="no_left_turn">禁止左转</option><option value="no_right_turn">禁止右转</option><option value="no_u_turn">禁止掉头</option><option value="only_straight_on">只能直行</option></select></label><button id="rule-save-turn" class="action secondary" type="button">备份并新增转向限制</button></div><div id="rule-design-status" class="signal-note">正在读取道路规则…</div></div></details>
   </aside>
   <section class="map-card">
     <div class="map-toolbar"><strong id="map-name">map_galileo.osm</strong><span>正在加载底图…</span></div>
@@ -171,6 +173,7 @@ reset.addEventListener('click',resetSelection);async function initialize(){try{c
       panel.classList.toggle('menu-active', selected);
       panel.open = selected;
     });
+    window.dispatchEvent(new CustomEvent('osm-nav-menu-change', {detail: {target}}));
   }));
 </script>
 <script src="leaflet-map.js"></script>

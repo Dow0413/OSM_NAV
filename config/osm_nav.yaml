@@ -1,13 +1,13 @@
 osm_nav:
   ros__parameters:
     # Filename under this package's maps/, or an absolute OSM/XML path.
-    map_file: 0924_4.osm
+    map_file: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/maps/galileo_0929_origin.osm
     host: 127.0.0.1
     port: 8090
 
     # Machine-dog pedestrian-demo planning parameters.
     topo_setting_yaml: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/config/topo_setting.yaml
-    topo_setting_chose: car
+    topo_setting_chose: x1w
 
     # Web UI defaults. Smaller values permit deeper map zoom.
     default_display_mode: compact
@@ -22,6 +22,7 @@ osm_nav:
     pcd_overlay: true
     pcd: /home/dow/DOW/dinov3/lanelet2/gps_map/map.pcd
     manifest_yaml: /home/dow/DOW/dinov3/lanelet2/gps_map/manifest.yaml
+
     # New paired_*.yaml exports from the 3D PCD/OSM editor are saved here.
     pair_files_dir: /home/dow/DOW/dinov3/lanelet2/src/osm_nav/pair_files
 

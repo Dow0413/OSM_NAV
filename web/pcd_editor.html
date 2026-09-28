@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PCD / OSM 三维校图</title>
+  <style>
+    :root { font-family: "Noto Sans CJK SC", system-ui, sans-serif; color: #183243; background: #edf2f3; } * { box-sizing: border-box; }
+    body { margin: 0; height: 100vh; display: grid; grid-template-columns: minmax(280px, 350px) 1fr; overflow: hidden; }
+    aside { z-index: 2; overflow-y: auto; padding: 18px; background: #fff; border-right: 1px solid #d5e0e5; box-shadow: 2px 0 12px #274c5b14; }
+    h1 { margin: 0; color: #19455c; font-size: 20px; } h2 { margin: 22px 0 9px; color: #19455c; font-size: 15px; } p, small { color: #607683; font-size: 12px; line-height: 1.55; }
+    label { display: grid; gap: 5px; margin: 11px 0; color: #3b5867; font-size: 12px; font-weight: 650; } select, input { width: 100%; padding: 8px; border: 1px solid #b9cbd3; border-radius: 7px; background: #fff; color: #183243; font: inherit; }
+    input[type="range"] { padding: 0; accent-color: #167294; } button, .back { width: 100%; margin-top: 8px; padding: 10px; border: 0; border-radius: 8px; background: #167294; color: #fff; font: inherit; font-weight: 650; cursor: pointer; text-align: center; text-decoration: none; } button:hover { background: #115e7b; } button.secondary, .back { background: #fff; color: #315464; border: 1px solid #b9cbd3; }
+    button:disabled { background: #a7bac3; cursor: not-allowed; } .readout { padding: 10px; border-radius: 8px; background: #eef6f8; color: #315464; font: 12px ui-monospace, monospace; line-height: 1.55; white-space: pre-line; } .warn { border-left: 4px solid #d79a24; padding-left: 9px; }
+    main { position: relative; min-width: 0; } #canvas { display: block; width: 100%; height: 100%; } .legend { position: absolute; right: 15px; bottom: 15px; padding: 9px 12px; border-radius: 8px; background: #ffffffdd; font-size: 12px; line-height: 1.6; box-shadow: 0 2px 8px #16374724; } .legend i { display: inline-block; width: 12px; height: 4px; margin-right: 4px; vertical-align: middle; } @media (max-width: 750px) { body { grid-template-columns: 1fr; grid-template-rows: auto minmax(400px, 1fr); overflow: auto; } aside { border-right: 0; border-bottom: 1px solid #d5e0e5; } }
+
+    /* Keep dense Chinese control text readable at narrow widths. */
+    aside { padding: 20px; min-width: 320px; }
+    h1 { margin: 16px 0 7px; font-size: 21px; line-height: 1.3; }
+    h2 { margin-top: 24px; padding-top: 14px; border-top: 1px solid #e3ecef; }
+    p { margin: 7px 0 14px; overflow-wrap: anywhere; }
+    label { margin: 14px 0; line-height: 1.35; }
+    .field-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    output { color: #167294; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .satellite-toggle { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid #d8e4e8; border-radius: 8px; background: #f9fcfd; }
+    .satellite-toggle input { width: auto; margin: 0; }
+    .control-help { margin: 4px 0 13px; padding: 9px 10px; border-radius: 8px; background: #f4fafb; color: #496571; font-size: 12px; line-height: 1.55; }
+    .readout { margin-top: 14px; overflow-wrap: anywhere; }
+    @media (max-width: 750px) { aside { min-width: 0; padding: 16px; } }
+  </style>
+</head>
+<body>
+  <aside>
+    <a class="back" href="index.html">← 返回二维导航地图</a>
+    <h1>PCD / OSM 三维校图</h1>
+    <p>默认采用<strong>东向右、北向上</strong>的俯视地图方向。左键拖动旋转，滚轮缩放，右键拖动平移；可随时使用“北向上复位”。单击橙色节点可选中；按住 <kbd>Shift</kbd> 再左键拖动该节点，才会修改其位置。</p>
+    <label>PCD 坐标解释<select id="frame"><option value="raw">原始 XY 已是 ENU</option><option value="aligned">应用 t_align 后为 ENU</option><option value="inverse">应用 t_align 逆变换后为 ENU</option></select></label>
+    <button id="north-up" class="secondary" type="button">北向上复位</button>
+    <label class="satellite-toggle"><input id="satellite-visible" type="checkbox">显示 Esri 卫星影像底图</label>
+    <button id="toggle-node-editor" class="secondary" type="button">显示节点编辑点</button>
+    <p class="control-help">道路显示为线；建筑和区域显示为半透明面；交通信号点重点标记。节点编辑点默认隐藏，点击“显示节点编辑点”后，使用 <kbd>Shift</kbd> + 左键拖动编辑。</p>
+    <label><span class="field-title">OSM 显示 Z 偏移 <output id="z-output">0.0 m</output></span><input id="z-offset" type="range" min="-20" max="50" value="0" step="0.1"></label>
+    <label>节点 ID<input id="node-id" readonly placeholder="在右侧点击 OSM 节点"></label>
+    <label>东向 East（m）<input id="node-east" type="number" step="0.001" disabled></label>
+    <label>北向 North（m）<input id="node-north" type="number" step="0.001" disabled></label>
+    <button id="apply-node" class="secondary" disabled>应用输入坐标</button>
+    <button id="focus-node" class="secondary" type="button" disabled>节点正上方俯视</button>
+    <div id="status" class="readout">正在加载 3D 数据…</div>
+    <h2>保存修改</h2>
+    <p class="warn">保存会先在同一目录创建带 UTC 时间戳的 <code>.bak.osm</code> 备份，再原子写回当前 OSM 文件。保存后请重启导航服务，以重建规划拓扑。</p>
+    <button id="save" disabled>备份并保存 OSM 修改</button>
+  </aside>
+  <main><canvas id="canvas"></canvas><div class="legend"><i style="background:#2f7dbb"></i>卫星影像底图<br><i style="background:#00d2eb"></i>PCD 点云<br><i style="background:#f5cf4b"></i>道路线路<br><i style="background:#f28b28"></i>建筑 / 区域面<br><i style="background:#f04747"></i>交通信号点 / 当前选中节点</div></main>
+  <script src="https://unpkg.com/three@0.128.0/build/three.min.js"></script>
+  <script src="https://unpkg.com/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script>
+  (() => {
+    const canvas = document.getElementById('canvas'), status = document.getElementById('status');
+    const frame = document.getElementById('frame'), zOffset = document.getElementById('z-offset'), zOutput = document.getElementById('z-output');
+    const nodeId = document.getElementById('node-id'), nodeEast = document.getElementById('node-east'), nodeNorth = document.getElementById('node-north'), applyNode = document.getElementById('apply-node'), focusNode = document.getElementById('focus-node'), save = document.getElementById('save'), northUp = document.getElementById('north-up'), satelliteVisible = document.getElementById('satellite-visible'), toggleNodeEditor = document.getElementById('toggle-node-editor');
+    const renderer = new THREE.WebGLRenderer({canvas, antialias: true}); renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); renderer.setClearColor(0x17232a);
+    const scene = new THREE.Scene(), camera = new THREE.PerspectiveCamera(55, 1, .1, 200000), controls = new THREE.OrbitControls(camera, canvas); controls.enableDamping = true;
+    scene.add(new THREE.AmbientLight(0xffffff, .8)); const grid = new THREE.GridHelper(200, 20, 0x3e5965, 0x2b414b); scene.add(grid);
+    const osmGroup = new THREE.Group(); scene.add(osmGroup); const selectedMarker = new THREE.Mesh(new THREE.SphereGeometry(2.8, 14, 10), new THREE.MeshBasicMaterial({color:0xd94b42})); selectedMarker.visible=false; osmGroup.add(selectedMarker); let nodePoints, roadObject, buildingGroup, areaGroup, signalObject, nodes = [], nodeIndex = new Map(), edits = new Map(), selected = -1, dragging = false, pendingSelection = -1, pointerDown = null, pcdObject, satellitePlane, activeData, sceneCenter = new THREE.Vector3(), sceneSize = 100;
+    const raycaster = new THREE.Raycaster(), pointer = new THREE.Vector2(), plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), hit = new THREE.Vector3(); raycaster.params.Points.threshold = 3;
+    function resize() { const {clientWidth:w, clientHeight:h} = canvas; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); } addEventListener('resize', resize);
+    function render() { resize(); controls.update(); renderer.render(scene, camera); requestAnimationFrame(render); } render();
+    function setStatus(message) { status.textContent = message; }
+    function resetNorthUp() { camera.up.set(0, 0, -1); camera.position.set(sceneCenter.x, sceneCenter.y + sceneSize * 1.2, sceneCenter.z); controls.target.copy(sceneCenter); controls.update(); }
+    function removeSatellite() { if (!satellitePlane) return; scene.remove(satellitePlane); satellitePlane.geometry.dispose(); satellitePlane.material.map?.dispose(); satellitePlane.material.dispose(); satellitePlane = undefined; }
+    function updateSatellite() {
+      removeSatellite();
+      if (!satelliteVisible.checked || !activeData?.pcd_bounds) return;
+      const [xmin, ymin, xmax, ymax] = activeData.pcd_bounds.local;
+      const [[south, west], [north, east]] = activeData.pcd_bounds.geographic;
+      const params = new URLSearchParams({bbox:`${west},${south},${east},${north}`,bboxSR:'4326',imageSR:'4326',size:'1536,1536',format:'png32',transparent:'false',f:'image'});
+      const url = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?${params}`;
+      new THREE.TextureLoader().load(url, texture => {
+        if (!satelliteVisible.checked) { texture.dispose(); return; }
+        const geometry = new THREE.PlaneGeometry(xmax-xmin, ymax-ymin); geometry.rotateX(-Math.PI/2);
+        const minZ = Math.min(...activeData.points.map(point => point[2]));
+        satellitePlane = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({map:texture, side:THREE.DoubleSide, depthWrite:false}));
+        satellitePlane.position.set((xmin+xmax)/2, minZ-.4, -(ymin+ymax)/2);
+        satellitePlane.renderOrder = -1; scene.add(satellitePlane);
+      }, undefined, () => setStatus('卫星影像加载失败：请检查网络是否可访问 Esri 服务。'));
+    }
+    function focusSelectedNode() { if (selected < 0) return; const n = nodes[selected]; const target = new THREE.Vector3(n.east, osmGroup.position.y, -n.north); camera.up.set(0, 0, -1); camera.position.set(target.x, target.y + Math.max(35, sceneSize * .28), target.z); controls.target.copy(target); controls.update(); setStatus(`正在从节点 ${n.id} 正上方俯视；可用左键旋转恢复自由视角。`); }
+    function linePositions(ways) { const positions=[]; for (const way of ways) for (let i=0;i<way.length-1;i++) { const a=nodeIndex.get(way[i]), b=nodeIndex.get(way[i+1]); if(a&&b) positions.push(a.east,0,-a.north,b.east,0,-b.north); } return positions; }
+    function regionGroup(ways, color, opacity) { const group = new THREE.Group(); for (const way of ways) { const shape = new THREE.Shape(); let first = true; for (const id of way) { const n=nodeIndex.get(id); if (!n) continue; if (first) { shape.moveTo(n.east, -n.north); first = false; } else shape.lineTo(n.east, -n.north); } if (!first) { const geometry = new THREE.ShapeGeometry(shape); geometry.rotateX(Math.PI / 2); group.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({color, transparent:true, opacity, side:THREE.DoubleSide, depthWrite:false}))); } } return group; }
+    function drawSemanticFeatures() { if (buildingGroup) osmGroup.remove(buildingGroup); if (areaGroup) osmGroup.remove(areaGroup); buildingGroup = regionGroup(window.buildings, 0xf28b28, .42); areaGroup = regionGroup(window.areas, 0x7cbd7a, .22); osmGroup.add(areaGroup, buildingGroup); }
+    function updateOsmGeometry() { const positions = nodePoints.geometry.attributes.position.array; for (let i=0;i<nodes.length;i++) { positions[i*3] = nodes[i].east; positions[i*3+2] = -nodes[i].north; } nodePoints.geometry.attributes.position.needsUpdate = true; roadObject.geometry.setAttribute('position',new THREE.Float32BufferAttribute(linePositions(window.roads),3)); }
+    function select(index) { selected = index; const n = nodes[index]; selectedMarker.visible=true; selectedMarker.position.set(n.east,0,-n.north); nodeId.value = n.id; nodeEast.value = n.east.toFixed(3); nodeNorth.value = n.north.toFixed(3); nodeEast.disabled = nodeNorth.disabled = applyNode.disabled = focusNode.disabled = false; setStatus(`已选节点 ${n.id}。按住 Shift 后拖动，或输入 East/North 后应用。`); }
+    function applySelected() { if (selected < 0) return; const east=Number(nodeEast.value), north=Number(nodeNorth.value); if (!Number.isFinite(east)||!Number.isFinite(north)) return setStatus('请输入有效的 East / North 数值。'); const n=nodes[selected]; n.east=east; n.north=north; selectedMarker.position.set(n.east,0,-n.north); edits.set(n.id,{id:n.id,east,north}); updateOsmGeometry(); drawSemanticFeatures(); save.disabled = false; }
+    applyNode.addEventListener('click', applySelected); focusNode.addEventListener('click', focusSelectedNode); [nodeEast,nodeNorth].forEach(input=>input.addEventListener('change', applySelected));
+    function pointerAt(event) { const rect=canvas.getBoundingClientRect(); pointer.set((event.clientX-rect.left)/rect.width*2-1, -(event.clientY-rect.top)/rect.height*2+1); raycaster.setFromCamera(pointer,camera); }
+    canvas.addEventListener('pointerdown', event => {
+      pointerAt(event);
+      const found = nodePoints?.visible ? raycaster.intersectObject(nodePoints) : [];
+      pointerDown = {x: event.clientX, y: event.clientY};
+      pendingSelection = found.length ? found[0].index : -1;
+      if (event.shiftKey && found.length) {
+        select(found[0].index);
+        dragging = true;
+        controls.enabled = false;
+        canvas.setPointerCapture(event.pointerId);
+        event.preventDefault();
+      }
+    });
+    canvas.addEventListener('pointermove', event => {
+      if (!dragging || selected < 0) return;
+      pointerAt(event);
+      if (raycaster.ray.intersectPlane(plane, hit)) {
+        const n=nodes[selected]; n.east=hit.x; n.north=-hit.z;
+        selectedMarker.position.set(n.east,0,-n.north);
+        nodeEast.value=n.east.toFixed(3); nodeNorth.value=n.north.toFixed(3);
+        edits.set(n.id,{id:n.id,east:n.east,north:n.north}); updateOsmGeometry(); save.disabled=false;
+      }
+    });
+    function stopDrag(event) {
+      if (dragging) { dragging=false; controls.enabled=true; drawSemanticFeatures(); }
+      else if (pendingSelection >= 0 && pointerDown && Math.hypot(event.clientX-pointerDown.x, event.clientY-pointerDown.y) < 5) select(pendingSelection);
+      pendingSelection=-1; pointerDown=null;
+    }
+    canvas.addEventListener('pointerup', stopDrag); canvas.addEventListener('pointercancel', stopDrag);
+    zOffset.addEventListener('input', () => { osmGroup.position.y=Number(zOffset.value); plane.constant=-osmGroup.position.y; zOutput.value=`${Number(zOffset.value).toFixed(1)} m`; zOutput.textContent=zOutput.value; });
+    async function load() { setStatus('正在加载抽样 PCD 和 OSM 节点…'); removeSatellite(); save.disabled=true; edits.clear(); selected=-1; selectedMarker.visible=false; focusNode.disabled=true; const response=await fetch(`/api/editor/data?frame=${encodeURIComponent(frame.value)}`); const data=await response.json(); if(!response.ok) throw new Error(data.error||response.statusText); activeData=data; if(pcdObject) scene.remove(pcdObject); if(nodePoints) osmGroup.remove(nodePoints); if(roadObject) osmGroup.remove(roadObject); if(signalObject) osmGroup.remove(signalObject); if(buildingGroup) osmGroup.remove(buildingGroup); if(areaGroup) osmGroup.remove(areaGroup); nodes=data.nodes; window.roads=data.roads; window.buildings=data.buildings; window.areas=data.areas; nodeIndex=new Map(nodes.map(n=>[n.id,n])); const p=[]; for(const point of data.points) p.push(point[0],point[2],-point[1]); const pg=new THREE.BufferGeometry(); pg.setAttribute('position',new THREE.Float32BufferAttribute(p,3)); pcdObject=new THREE.Points(pg,new THREE.PointsMaterial({color:0x00d2eb,size:.35,sizeAttenuation:true,transparent:true,opacity:.8})); scene.add(pcdObject); const np=[]; for(const n of nodes) np.push(n.east,0,-n.north); const ng=new THREE.BufferGeometry(); ng.setAttribute('position',new THREE.Float32BufferAttribute(np,3)); nodePoints=new THREE.Points(ng,new THREE.PointsMaterial({color:0xffffff,size:2.2,sizeAttenuation:true})); nodePoints.visible=false; osmGroup.add(nodePoints); const lg=new THREE.BufferGeometry(); lg.setAttribute('position',new THREE.Float32BufferAttribute(linePositions(window.roads),3)); roadObject=new THREE.LineSegments(lg,new THREE.LineBasicMaterial({color:0xf5cf4b,transparent:true,opacity:.9})); osmGroup.add(roadObject); const sp=[]; for(const id of data.signals) { const n=nodeIndex.get(id); if(n) sp.push(n.east,.9,-n.north); } const sg=new THREE.BufferGeometry(); sg.setAttribute('position',new THREE.Float32BufferAttribute(sp,3)); signalObject=new THREE.Points(sg,new THREE.PointsMaterial({color:0xf04747,size:4.5,sizeAttenuation:true})); osmGroup.add(signalObject); drawSemanticFeatures(); updateSatellite(); const box=new THREE.Box3().setFromObject(pcdObject); sceneCenter=box.getCenter(new THREE.Vector3()); sceneSize=box.getSize(new THREE.Vector3()).length()||100; resetNorthUp(); setStatus(`${data.map_name}\nPCD 抽样点：${data.points.length.toLocaleString()}\n道路：${data.roads.length.toLocaleString()} 条 · 建筑：${data.buildings.length.toLocaleString()} 个 · 区域：${data.areas.length.toLocaleString()} 个\n交通信号点：${data.signals.length.toLocaleString()} 个\n节点编辑点默认隐藏；需要编辑时请点击左侧按钮。`); }
+    northUp.addEventListener('click', resetNorthUp);
+    satelliteVisible.addEventListener('change', updateSatellite);
+    toggleNodeEditor.addEventListener('click', () => { if (!nodePoints) return; nodePoints.visible = !nodePoints.visible; toggleNodeEditor.textContent = nodePoints.visible ? '隐藏节点编辑点' : '显示节点编辑点'; setStatus(nodePoints.visible ? '节点编辑点已显示：单击选择，Shift + 左键拖动修改。' : '节点编辑点已隐藏：道路、建筑、区域和信号灯仍在显示。'); });
+    frame.addEventListener('change', () => load().catch(error=>setStatus(`加载失败：${error.message}`)));
+    save.addEventListener('click', async () => { if(!edits.size) return; save.disabled=true; try { const response=await fetch('/api/editor/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({edits:[...edits.values()]})}); const data=await response.json(); if(!response.ok) throw new Error(data.error||response.statusText); edits.clear(); setStatus(`已保存 ${data.updated_nodes} 个节点。\n备份：${data.backup}\n请重启导航服务以重建路网。`); } catch(error) { setStatus(`保存失败：${error.message}`); save.disabled=false; } });
+    load().catch(error=>setStatus(`加载失败：${error.message}`));
+  })();
+  </script>
+</body></html>

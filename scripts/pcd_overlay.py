@@ -110,6 +110,42 @@ class PcdOverlay:
             "pixel_size_m": self.pixel_size_m,
         }
 
+    def to_enu(self, latitude, longitude):
+        """Convert a WGS-84 coordinate to the local ENU approximation in metres."""
+        lat0, lon0, altitude = self.origin
+        latitude0 = math.radians(lat0)
+        sin_lat = math.sin(latitude0)
+        radius_prime = WGS84_A / math.sqrt(1 - WGS84_E2 * sin_lat ** 2)
+        radius_meridian = WGS84_A * (1 - WGS84_E2) / (1 - WGS84_E2 * sin_lat ** 2) ** 1.5
+        east = math.radians(float(longitude) - lon0) * (radius_prime + altitude) * math.cos(latitude0)
+        north = math.radians(float(latitude) - lat0) * (radius_meridian + altitude)
+        return east, north
+
+    def to_lla(self, east, north):
+        return self._to_lla(float(east), float(north))
+
+    def editor_bounds(self, frame):
+        if frame not in self._bounds:
+            raise ValueError("frame must be raw, aligned, or inverse")
+        xmin, ymin, xmax, ymax = self._bounds[frame]
+        south_west, north_east = self.geographic_bounds(frame)
+        return {
+            "local": [xmin, ymin, xmax, ymax],
+            "geographic": [south_west, north_east],
+        }
+
+    def editor_points(self, frame, maximum=120000):
+        """Return a bounded point sample suitable for the browser's WebGL editor."""
+        if frame not in self._bounds:
+            raise ValueError("frame must be raw, aligned, or inverse")
+        stride = max(1, int(math.ceil(self.point_count / max(1, int(maximum)))))
+        sample = self.points[::stride, :3]
+        if frame != "raw":
+            matrix = self.matrix if frame == "aligned" else self.inverse_matrix
+            sample = sample @ matrix[:3, :3].T + matrix[:3, 3]
+        valid = np.isfinite(sample).all(axis=1)
+        return sample[valid].astype(float).tolist()
+
     def png(self, frame, height_mode):
         if frame not in self._bounds or height_mode not in ("all", "high"):
             raise ValueError("frame must be raw/aligned/inverse and height must be all/high")

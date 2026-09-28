@@ -3,12 +3,14 @@
 
 import argparse
 import errno
-import heapq
 import json
 import math
+import shutil
 import mimetypes
+import sys
 import threading
 import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,28 +26,21 @@ from rclpy.node import Node
 from std_msgs.msg import Int8
 import yaml
 
+# Keep algorithm modules discoverable in both layouts: ``scripts/../src`` in
+# a checkout and ``lib/osm_nav/src`` after ament installs the executable.
+SCRIPT_DIR = Path(__file__).resolve().parent
+for module_root in (SCRIPT_DIR / "src", SCRIPT_DIR.parent / "src"):
+    if module_root.is_dir() and str(module_root) not in sys.path:
+        sys.path.insert(0, str(module_root))
+
+from roading import OSMRoadNetwork
+from traffic_rules import DEFAULT_ROBOT_DOG_SPEED_MPS, DEFAULT_SIGNAL_WAIT_SECONDS, SAFETY_MULTIPLIER
+
 from pcd_overlay import PcdOverlay
 
-# Demo profile: the robot dog emulates a pedestrian while applying conservative
-# safety policies to shared carriageways. This is not a legal certification.
-WALKABLE = {
-    "footway", "path", "pedestrian", "steps", "living_street", "residential", "service",
-    "unclassified", "tertiary", "secondary", "primary", "track"
-}
-DEDICATED_PEDESTRIAN_WAYS = {"footway", "path", "pedestrian", "steps"}
-# Extra planning cost on shared carriageways makes dedicated pedestrian facilities preferred.
-SAFETY_MULTIPLIER = {
-    "footway": 1.0, "pedestrian": 1.0, "path": 1.1, "steps": 1.5,
-    "living_street": 1.2, "service": 1.3, "residential": 1.5, "unclassified": 1.8,
-    "track": 1.8, "tertiary": 2.5, "secondary": 3.0, "primary": 4.0,
-}
-DEFAULT_ROBOT_DOG_SPEED_MPS = 1.0
-DEFAULT_SIGNAL_WAIT_SECONDS = 20.0
 DEFAULT_MIN_ZOOM_WIDTH = 2.0
 DEFAULT_SIGNAL_STOP_DISTANCE_M = 2.0
 EARTH_RADIUS_M = 6_371_000
-
-
 def parse_bool(value):
     normalized = str(value).strip().lower()
     if normalized in {"1", "true", "yes", "on"}:
@@ -53,43 +48,6 @@ def parse_bool(value):
     if normalized in {"0", "false", "no", "off"}:
         return False
     raise argparse.ArgumentTypeError("expected a boolean: true or false")
-
-
-def tags(element):
-    return {tag.attrib["k"]: tag.attrib["v"] for tag in element.findall("tag")}
-
-
-def is_walkable(road_type, way_tags):
-    """Return whether a way is accessible to a pedestrian-like robot profile."""
-    return (
-        road_type in WALKABLE
-        and way_tags.get("foot") not in {"no", "use_sidepath"}
-        and way_tags.get("access") not in {"no", "private"}
-    )
-
-
-def robot_dog_oneway(road_type, way_tags):
-    """Apply explicit pedestrian direction first, then vehicle direction on shared roads."""
-    pedestrian_direction = way_tags.get("oneway:foot")
-    if pedestrian_direction in {"yes", "-1"}:
-        return pedestrian_direction
-    if road_type not in DEDICATED_PEDESTRIAN_WAYS:
-        vehicle_direction = way_tags.get("oneway")
-        if vehicle_direction in {"yes", "-1"}:
-            return vehicle_direction
-    return None
-
-
-def planning_cost_per_meter(road_type, robot_dog_speed_mps, safety_multipliers):
-    return safety_multipliers.get(road_type, 2.0) / robot_dog_speed_mps
-
-
-def distance_m(a, b):
-    latitude = math.radians((a[0] + b[0]) / 2)
-    dx = math.radians(a[1] - b[1]) * EARTH_RADIUS_M * math.cos(latitude)
-    dy = math.radians(a[0] - b[0]) * EARTH_RADIUS_M
-    return math.hypot(dx, dy)
-
 
 def _pair_values(value, field_name, index):
     """Accept [first, second] or a named coordinate mapping from paired.yaml."""
@@ -346,317 +304,100 @@ class RosNavigationBridge(Node):
         return [[x, y] for x, y in slam_path]
 
 
-class OSMRoadNetwork:
-    def __init__(
-        self, map_path, robot_dog_speed_mps=DEFAULT_ROBOT_DOG_SPEED_MPS,
-        signal_wait_seconds=DEFAULT_SIGNAL_WAIT_SECONDS, safety_multipliers=None, ui_config=None
-    ):
-        self.map_path = Path(map_path)
-        self.robot_dog_speed_mps = robot_dog_speed_mps
-        self.signal_wait_seconds = signal_wait_seconds
-        self.safety_multipliers = dict(SAFETY_MULTIPLIER)
-        self.safety_multipliers.update(safety_multipliers or {})
-        self.ui_config = ui_config or {}
-        root = ET.parse(map_path).getroot()
-        self.nodes = {
-            node.attrib["id"]: (float(node.attrib["lat"]), float(node.attrib["lon"]))
-            for node in root.findall("node")
-        }
-        self.traffic_signal_nodes = {
-            node.attrib["id"] for node in root.findall("node")
-            if tags(node).get("highway") == "traffic_signals"
-            or tags(node).get("traffic_signals") == "signal"
-            or tags(node).get("crossing") == "traffic_signals"
-            or tags(node).get("crossing:signals") == "yes"
-        }
-        self.signal_coordinates = {node_id: self.nodes[node_id] for node_id in self.traffic_signal_nodes}
-        self._signal_lock = threading.Lock()
-        self.signal_states = {node_id: 1 for node_id in self.traffic_signal_nodes}
-        self.signal_crossing_count = {node_id: 0 for node_id in self.traffic_signal_nodes}
-        if not self.nodes:
-            raise RuntimeError("The OSM file has no nodes.")
-        lats = [point[0] for point in self.nodes.values()]
-        lons = [point[1] for point in self.nodes.values()]
-        self.bounds = {"min_lat": min(lats), "min_lon": min(lons), "max_lat": max(lats), "max_lon": max(lons)}
-        self.reference_lat = sum(lats) / len(lats)
-        self.graph, self.segments = {}, []
-        self.segment_by_edge = {}
-        self.roads, self.buildings, self.areas = [], [], []
+class OSMMapEditor:
+    """Mutable OSM node editor. Writes only after an explicit save request."""
 
-        for way in root.findall("way"):
-            way_tags = tags(way)
-            references = [ref.attrib["ref"] for ref in way.findall("nd") if ref.attrib["ref"] in self.nodes]
-            coordinates = [[self.nodes[node_id][0], self.nodes[node_id][1]] for node_id in references]
-            if len(coordinates) >= 3 and way_tags.get("building"):
-                self.buildings.append({"coordinates": coordinates, "name": way_tags.get("name", "")})
-            area_kind = way_tags.get("landuse") or way_tags.get("natural")
-            if len(coordinates) >= 3 and area_kind:
-                self.areas.append({"coordinates": coordinates, "kind": area_kind, "name": way_tags.get("name", "")})
+    def __init__(self, map_path):
+        self.map_path = Path(map_path).resolve()
+        self._lock = threading.Lock()
 
-            road_type = way_tags.get("highway")
-            if road_type:
-                self.roads.append({
-                    "coordinates": coordinates,
-                    "kind": road_type,
-                    "name": way_tags.get("name", ""),
-                    "oneway": way_tags.get("oneway", ""),
-                    "lanes": way_tags.get("lanes", ""),
-                    "maxspeed": way_tags.get("maxspeed", ""),
-                })
-            if not is_walkable(road_type, way_tags) or len(references) < 2:
+    def data(self, pcd_overlay, frame):
+        if pcd_overlay is None:
+            raise ValueError("PCD overlay is disabled")
+        if frame not in {"raw", "aligned", "inverse"}:
+            raise ValueError("frame must be raw, aligned, or inverse")
+        root = ET.parse(self.map_path).getroot()
+        nodes = {}
+        for node in root.findall("node"):
+            node_id = node.attrib.get("id")
+            if not node_id:
                 continue
-
-            # Dedicated pedestrian ways stay bidirectional unless explicitly marked
-            # `oneway:foot`. On a shared carriageway, the demo follows OSM vehicle
-            # direction to avoid routing the robot against the road flow.
-            one_way = robot_dog_oneway(road_type, way_tags)
-            pairs = list(zip(references, references[1:]))
-            way_signals = [node_id for node_id in references if node_id in self.traffic_signal_nodes]
-            # A motor-vehicle signal must not stop a pedestrian route. Only an
-            # explicitly signalled pedestrian way controls the robot dog.
-            synthetic_signal_id = None
-            if road_type in DEDICATED_PEDESTRIAN_WAYS:
-                if not way_signals and way_tags.get("crossing") == "traffic_signals":
-                    synthetic_signal_id = f"way:{way.attrib['id']}"
-                    self.signal_coordinates[synthetic_signal_id] = coordinates[len(coordinates) // 2]
-                    self.signal_states[synthetic_signal_id] = 1
-                    self.signal_crossing_count[synthetic_signal_id] = 0
-            signal_controlled = bool(way_signals or synthetic_signal_id) and road_type in DEDICATED_PEDESTRIAN_WAYS
-            signal_wait_per_segment = self.signal_wait_seconds / len(pairs) if signal_controlled else 0.0
-            for original_start, original_end in pairs:
-                signal_id = synthetic_signal_id
-                if signal_controlled and way_signals:
-                    midpoint = tuple((a + b) / 2 for a, b in zip(self.nodes[original_start], self.nodes[original_end]))
-                    signal_id = min(way_signals, key=lambda node_id: distance_m(midpoint, self.nodes[node_id]))
-                if signal_id:
-                    self.signal_crossing_count[signal_id] += 1
-                start, end = original_start, original_end
-                if one_way == "-1":
-                    start, end = end, start
-                length = distance_m(self.nodes[start], self.nodes[end])
-                cost_per_m = planning_cost_per_meter(
-                    road_type, self.robot_dog_speed_mps, self.safety_multipliers
-                ) + signal_wait_per_segment / length
-                cost = length * cost_per_m
-                self.graph.setdefault(start, []).append((end, cost))
-                bidirectional = one_way not in {"yes", "-1"}
-                if bidirectional:
-                    self.graph.setdefault(end, []).append((start, cost))
-                segment = {
-                    "start": start,
-                    "end": end,
-                    "bidirectional": bidirectional,
-                    "kind": road_type,
-                    "name": way_tags.get("name", ""),
-                    "cost_per_m": cost_per_m,
-                    "signal_controlled": signal_controlled,
-                    "signal_id": signal_id,
-                }
-                self.segments.append(segment)
-                for edge in ([(start, end), (end, start)] if bidirectional else [(start, end)]):
-                    if edge not in self.segment_by_edge or signal_controlled:
-                        self.segment_by_edge[edge] = segment
-
-        # Map data is immutable while the server is running. Build and encode both
-        # display variants once at startup so a large OSM file is not repeatedly
-        # traversed and JSON-serialized for every browser refresh/layer switch.
-        self._map_payloads = {
-            "compact": self._build_map_data("compact"),
-            "full": self._build_map_data("full"),
-        }
-        self._map_json = {
-            detail: json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            for detail, payload in self._map_payloads.items()
-        }
-
-    def map_data(self, detail="compact"):
-        """Return a light road-only map by default; full mode is for inspection."""
-        if detail not in {"compact", "full"}:
-            raise ValueError("map detail must be compact or full")
-        return self._map_payloads[detail]
-
-    def map_json(self, detail="compact"):
-        """Return the pre-encoded immutable map response for a display mode."""
-        if detail not in {"compact", "full"}:
-            raise ValueError("map detail must be compact or full")
-        return self._map_json[detail]
-
-    def _build_map_data(self, detail):
-        if detail == "compact":
-            return {
-                "bounds": self.bounds,
-                "detail": "compact",
-                # Deliberately omit labels, nodes, buildings and areas. This keeps
-                # large raw OSM maps responsive in the browser.
-                "roads": [
-                    {"coordinates": road["coordinates"], "kind": road["kind"], "oneway": road["oneway"]}
-                    for road in self.roads
-                    if len(road["coordinates"]) >= 2
-                ],
-            }
-        return {
-            "bounds": self.bounds,
-            "detail": "full",
-            "roads": self.roads,
-            "buildings": self.buildings,
-            "areas": self.areas,
-            "nodes": [[node_id, point[0], point[1]] for node_id, point in self.nodes.items()],
-            "traffic_signals": [
-                [node_id, self.nodes[node_id][0], self.nodes[node_id][1]]
-                for node_id in sorted(self.traffic_signal_nodes)
-            ],
-        }
-
-    def config_data(self):
+            east, north = pcd_overlay.to_enu(node.attrib["lat"], node.attrib["lon"])
+            nodes[node_id] = [east, north]
+        roads, buildings, areas = [], [], []
+        for way in root.findall("way"):
+            refs = [nd.attrib["ref"] for nd in way.findall("nd") if nd.attrib.get("ref") in nodes]
+            if len(refs) < 2:
+                continue
+            tags = {tag.attrib.get("k"): tag.attrib.get("v") for tag in way.findall("tag")}
+            if tags.get("highway"):
+                roads.append(refs)
+            if len(refs) >= 3 and tags.get("building"):
+                buildings.append(refs)
+            if len(refs) >= 3 and (tags.get("landuse") or tags.get("natural")):
+                areas.append(refs)
+        signal_ids = []
+        for node in root.findall("node"):
+            tags = {tag.attrib.get("k"): tag.attrib.get("v") for tag in node.findall("tag")}
+            if (tags.get("highway") == "traffic_signals" or tags.get("traffic_signals") == "signal"
+                    or tags.get("crossing") == "traffic_signals" or tags.get("crossing:signals") == "yes"):
+                if node.attrib.get("id") in nodes:
+                    signal_ids.append(node.attrib["id"])
         return {
             "map_name": self.map_path.name,
-            "default_display_mode": self.ui_config.get("default_display_mode", "compact"),
-            "min_zoom_width": self.ui_config.get("min_zoom_width", DEFAULT_MIN_ZOOM_WIDTH),
-            "use_base_map": self.ui_config.get("use_base_map", "esri_satellite"),
-            "mode": self.ui_config.get("mode", 0),
-            "global_path_topic": self.ui_config.get("global_path_topic", "/global_path"),
-            "transform": self.ui_config.get("transform"),
-            "signal_stop_distance_m": self.ui_config.get("signal_stop_distance_m", DEFAULT_SIGNAL_STOP_DISTANCE_M),
+            "origin": pcd_overlay.origin,
+            "frame": frame,
+            "points": pcd_overlay.editor_points(frame),
+            "pcd_bounds": pcd_overlay.editor_bounds(frame),
+            "nodes": [{"id": node_id, "east": point[0], "north": point[1]} for node_id, point in nodes.items()],
+            "roads": roads,
+            "buildings": buildings,
+            "areas": areas,
+            "signals": signal_ids,
         }
 
-    def signal_state(self, signal_id):
-        with self._signal_lock:
-            return self.signal_states[signal_id]
-
-    def set_signal_state(self, signal_id, state):
-        if type(state) is not int or state not in (0, 1):
-            raise ValueError("signal state must be 0 (green) or 1 (red)")
-        with self._signal_lock:
-            if signal_id not in self.signal_states:
-                raise KeyError(signal_id)
-            self.signal_states[signal_id] = state
-
-    def signals_data(self):
-        with self._signal_lock:
-            return [{"id": signal_id, "latitude": point[0], "longitude": point[1],
-                     "state": self.signal_states[signal_id],
-                     "controls_pedestrian_crossing": self.signal_crossing_count[signal_id] > 0}
-                    for signal_id, point in sorted(self.signal_coordinates.items())]
-
-    def _to_local(self, point):
-        return (
-            math.radians(point[1]) * EARTH_RADIUS_M * math.cos(math.radians(self.reference_lat)),
-            math.radians(point[0]) * EARTH_RADIUS_M,
-        )
-
-    def _project_to_segment(self, point, start, end):
-        px, py = self._to_local(point)
-        ax, ay = self._to_local(start)
-        bx, by = self._to_local(end)
-        dx, dy = bx - ax, by - ay
-        length_sq = dx * dx + dy * dy
-        fraction = 0.0 if length_sq == 0 else max(0.0, min(1.0, ((px - ax) * dx + (py - ay) * dy) / length_sq))
-        projected = (start[0] + (end[0] - start[0]) * fraction, start[1] + (end[1] - start[1]) * fraction)
-        return fraction, projected, distance_m(point, projected)
-
-    def snap_to_road(self, point):
-        if not self.segments:
-            raise ValueError("The OSM map has no walkable road segments for the robot-dog profile.")
-        best = None
-        for segment in self.segments:
-            fraction, projected, snap_distance = self._project_to_segment(
-                point, self.nodes[segment["start"]], self.nodes[segment["end"]]
-            )
-            candidate = (snap_distance, fraction, projected, segment)
-            if best is None or candidate[0] < best[0]:
-                best = candidate
-        snap_distance, fraction, projected, segment = best
-        return {
-            "coordinate": projected,
-            "distance_m": snap_distance,
-            "fraction": fraction,
-            "segment": segment,
-            "road": {"name": segment["name"], "kind": segment["kind"]},
-        }
-
-    def _graph_with_virtual_points(self, start_snap, goal_snap):
-        graph = {node_id: list(edges) for node_id, edges in self.graph.items()}
-        coordinates = dict(self.nodes)
-
-        def attach(key, snap):
-            segment = snap["segment"]
-            start, end = segment["start"], segment["end"]
-            coordinate = snap["coordinate"]
-            coordinates[key] = coordinate
-            graph.setdefault(key, [])
-            first_cost = distance_m(self.nodes[start], coordinate) * segment["cost_per_m"]
-            second_cost = distance_m(coordinate, self.nodes[end]) * segment["cost_per_m"]
-            # Keeping the original direct edge is intentional: it permits independent
-            # start/goal projections on the same segment without modifying the base graph.
-            graph.setdefault(start, []).append((key, first_cost))
-            graph[key].append((end, second_cost))
-            if segment["bidirectional"]:
-                graph.setdefault(end, []).append((key, second_cost))
-                graph[key].append((start, first_cost))
-
-        attach("__start__", start_snap)
-        attach("__goal__", goal_snap)
-        return graph, coordinates
-
-    def route(self, start_point, goal_point):
-        start_snap = self.snap_to_road(start_point)
-        goal_snap = self.snap_to_road(goal_point)
-        graph, coordinates = self._graph_with_virtual_points(start_snap, goal_snap)
-        start, goal = "__start__", "__goal__"
-        costs, previous = {start: 0.0}, {}
-        queue = [(0.0, start)]
-        while queue:
-            cost, current = heapq.heappop(queue)
-            if cost != costs[current]:
-                continue
-            if current == goal:
-                break
-            for neighbor, edge_cost in graph.get(current, []):
-                candidate = cost + edge_cost
-                if candidate < costs.get(neighbor, float("inf")):
-                    costs[neighbor] = candidate
-                    previous[neighbor] = current
-                    heapq.heappush(queue, (candidate, neighbor))
-        if goal not in costs:
-            raise ValueError("The selected start and goal are not connected in the walkable robot-dog topology.")
-        path = [goal]
-        while path[-1] != start:
-            path.append(previous[path[-1]])
-        path.reverse()
-        path_coordinates = [[coordinates[node_id][0], coordinates[node_id][1]] for node_id in path]
-        physical_distance = sum(distance_m(a, b) for a, b in zip(path_coordinates, path_coordinates[1:]))
-        crossing_events = []
-        for index, (a, b) in enumerate(zip(path, path[1:])):
-            if a == "__start__":
-                segment = start_snap["segment"]
-            elif b == "__goal__":
-                segment = goal_snap["segment"]
-            else:
-                segment = self.segment_by_edge.get((a, b))
-            signal_id = segment["signal_id"] if segment else None
-            if signal_id:
-                if crossing_events and crossing_events[-1]["signal_id"] == signal_id and crossing_events[-1]["exit_index"] == index:
-                    crossing_events[-1]["exit_index"] = index + 1
-                else:
-                    crossing_events.append({"signal_id": signal_id, "entry_index": index, "exit_index": index + 1})
-        signal_count = len(crossing_events)
-        return {
-            "path": path_coordinates,
-            "distance_m": physical_distance,
-            "planning_cost_s": costs[goal],
-            "traffic_signal_count": signal_count,
-            "signal_wait_seconds": signal_count * self.signal_wait_seconds,
-            "crossing_events": crossing_events,
-            "start": start_snap,
-            "goal": goal_snap,
-        }
-
+    def save(self, pcd_overlay, edits):
+        if not isinstance(edits, list) or not edits:
+            raise ValueError("edits must contain at least one changed node")
+        if len(edits) > 10000:
+            raise ValueError("a single save may update at most 10000 nodes")
+        with self._lock:
+            tree = ET.parse(self.map_path)
+            root = tree.getroot()
+            node_by_id = {node.attrib.get("id"): node for node in root.findall("node")}
+            updates = []
+            for edit in edits:
+                if not isinstance(edit, dict):
+                    raise ValueError("each edit must be an object")
+                node_id = str(edit.get("id", ""))
+                if node_id not in node_by_id:
+                    raise ValueError(f"unknown OSM node: {node_id}")
+                east, north = float(edit["east"]), float(edit["north"])
+                if not math.isfinite(east) or not math.isfinite(north):
+                    raise ValueError("node coordinates must be finite")
+                latitude, longitude = pcd_overlay.to_lla(east, north)
+                updates.append((node_by_id[node_id], latitude, longitude))
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            backup = self.map_path.with_name(f"{self.map_path.stem}.{stamp}.bak{self.map_path.suffix}")
+            suffix = 1
+            while backup.exists():
+                backup = self.map_path.with_name(f"{self.map_path.stem}.{stamp}.{suffix}.bak{self.map_path.suffix}")
+                suffix += 1
+            shutil.copy2(self.map_path, backup)
+            for node, latitude, longitude in updates:
+                node.set("lat", f"{latitude:.9f}")
+                node.set("lon", f"{longitude:.9f}")
+            ET.indent(tree, space="  ")
+            temporary = self.map_path.with_suffix(self.map_path.suffix + ".tmp")
+            tree.write(temporary, encoding="utf-8", xml_declaration=True)
+            temporary.replace(self.map_path)
+        return {"updated_nodes": len(updates), "backup": backup.name, "restart_required": True}
 
 def default_map_path():
     return Path(get_package_share_directory("osm_nav")) / "maps" / "0924_4.osm"
 
 
-def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None):
+def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, map_editor=None):
     web_dir = web_dir.resolve()
 
     class Handler(BaseHTTPRequestHandler):
@@ -688,6 +429,15 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None):
                 return
             if request.path == "/api/pcd":
                 self.send_json(pcd_overlay.metadata() if pcd_overlay else {"available": False})
+                return
+            if request.path == "/api/editor/data":
+                try:
+                    if map_editor is None:
+                        raise ValueError("OSM editor is unavailable")
+                    frame = parse_qs(request.query).get("frame", ["raw"])[0]
+                    self.send_json(map_editor.data(pcd_overlay, frame))
+                except ValueError as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             if request.path == "/api/pcd/overlay":
                 if pcd_overlay is None:
@@ -751,6 +501,20 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None):
 
         def do_POST(self):
             request = urlparse(self.path)
+            if request.path == "/api/editor/save":
+                try:
+                    if map_editor is None:
+                        raise ValueError("OSM editor is unavailable")
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < content_length <= 2_000_000:
+                        raise ValueError("editor request body must be between 1 and 2000000 bytes")
+                    payload = json.loads(self.rfile.read(content_length))
+                    if not isinstance(payload, dict):
+                        raise ValueError("editor request must be a JSON object")
+                    self.send_json(map_editor.save(pcd_overlay, payload.get("edits")))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
             if not request.path.startswith("/api/signals/"):
                 self.send_error(HTTPStatus.NOT_FOUND)
                 return
@@ -857,7 +621,7 @@ def main():
     network.ui_config["transform"] = transform_metadata
     try:
         server = ThreadingHTTPServer(
-            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay)
+            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map))
         )
     except OSError as error:
         if error.errno == errno.EADDRINUSE:

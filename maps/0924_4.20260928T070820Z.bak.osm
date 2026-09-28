@@ -452,7 +452,7 @@
   <node id="1666817244" visible="true" version="3" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3162262" lon="120.0616305" />
   <node id="1666817246" visible="true" version="3" changeset="122467300" timestamp="2022-06-16T14:21:51Z" user="萧苏晏" uid="6088120" lat="30.3218979" lon="120.0602741" />
   <node id="1666817248" visible="true" version="4" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3248530" lon="120.0598870" />
-  <node id="1666817251" visible="true" version="7" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.327465447" lon="120.060876348" />
+  <node id="1666817251" visible="true" version="7" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3274362" lon="120.0608612" />
   <node id="1666817253" visible="true" version="4" changeset="122939040" timestamp="2022-06-28T06:26:44Z" user="萧苏晏" uid="6088120" lat="30.3143643" lon="120.0620652" />
   <node id="1666817255" visible="true" version="4" changeset="122933848" timestamp="2022-06-28T02:59:18Z" user="萧苏晏" uid="6088120" lat="30.3180373" lon="120.0612534" />
   <node id="1666817256" visible="true" version="3" changeset="122933848" timestamp="2022-06-28T02:59:18Z" user="萧苏晏" uid="6088120" lat="30.3201583" lon="120.0607422" />
@@ -5235,7 +5235,7 @@
   <node id="6604499364" visible="true" version="2" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3251428" lon="120.0620666" />
   <node id="6604499365" visible="true" version="2" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3255719" lon="120.0627493" />
   <node id="6604499366" visible="true" version="2" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3257646" lon="120.0600479" />
-  <node id="6604499367" visible="true" version="2" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.326719067" lon="120.060442942" />
+  <node id="6604499367" visible="true" version="2" changeset="120688964" timestamp="2022-05-08T05:13:02Z" user="萧苏晏" uid="6088120" lat="30.3267237" lon="120.0604316" />
   <node id="6604499368" visible="true" version="1" changeset="72121257" timestamp="2019-07-11T07:06:36Z" user="方恨少" uid="6161085" lat="30.3257233" lon="120.0601928" />
   <node id="6604499369" visible="true" version="2" changeset="124950291" timestamp="2022-08-16T02:43:24Z" user="萧苏晏" uid="6088120" lat="30.3266373" lon="120.0605441" />
   <node id="6604499370" visible="true" version="2" changeset="122467300" timestamp="2022-06-16T14:21:51Z" user="萧苏晏" uid="6088120" lat="30.3210225" lon="120.0483914" />
@@ -16670,11 +16670,11 @@
   <node id="14119742886" visible="true" version="1" changeset="187943483" timestamp="2026-08-24T14:58:17Z" user="Topiours" uid="21363326" lat="30.3258882" lon="120.0506446" />
   <node id="14208898375" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326392933" lon="120.059368852" />
   <node id="14208898378" visible="true" version="2" changeset="189439792" timestamp="2026-09-23T09:51:24Z" user="KnDOW" uid="24584477" lat="30.3260030" lon="120.0601285" />
-  <node id="14208910137" visible="true" version="3" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326019328" lon="120.060070779" />
-  <node id="14208910138" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326260812" lon="120.060162042" />
-  <node id="14208910139" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326411960" lon="120.060220997" />
-  <node id="14208910140" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.326767310" lon="120.060396336" />
-  <node id="14208910143" visible="true" version="4" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.324985879" lon="120.059808558">
+  <node id="14208910137" visible="true" version="3" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326012549" lon="120.060081198" />
+  <node id="14208910138" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3262615" lon="120.0601794" />
+  <node id="14208910139" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326503101" lon="120.060273094" />
+  <node id="14208910140" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3267612" lon="120.0604151" />
+  <node id="14208910143" visible="true" version="4" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3249857" lon="120.0598357">
     <tag k="highway" v="traffic_signals" />
     <tag k="traffic_signals" v="signal" />
     <tag k="traffic_signals:direction" v="both" />
@@ -16684,10 +16684,10 @@
     <tag k="traffic_signals" v="signal" />
     <tag k="traffic_signals:direction" v="both" />
   </node>
-  <node id="14208910145" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.325883773" lon="120.060030608" />
-  <node id="14208910146" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.325665002" lon="120.059961625" />
-  <node id="14208910147" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.325376053" lon="120.059891913" />
-  <node id="14208910148" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.325172680" lon="120.059845026" />
+  <node id="14208910145" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3258785" lon="120.0600445" />
+  <node id="14208910146" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3256763" lon="120.0599842" />
+  <node id="14208910147" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3253784" lon="120.0599093" />
+  <node id="14208910148" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3251763" lon="120.0598659" />
   <node id="14208910149" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3252043" lon="120.0601695" />
   <node id="14208910150" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3254961" lon="120.0602407" />
   <node id="14208910151" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3258494" lon="120.0603316" />
@@ -16696,7 +16696,7 @@
   <node id="14208910155" visible="true" version="1" changeset="189439726" timestamp="2026-09-23T09:50:08Z" user="KnDOW" uid="24584477" lat="30.3262820" lon="120.0604997" />
   <node id="14209332979" visible="true" version="3" changeset="189483937" timestamp="2026-09-24T08:24:44Z" user="KnDOW" uid="24584477" lat="30.326335737" lon="120.059818939" />
   <node id="14209332980" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326111780" lon="120.059729465" />
-  <node id="14209332981" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327028069" lon="120.060533188" />
+  <node id="14209332981" visible="true" version="2" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3270224" lon="120.0605504" />
   <node id="14211231349" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3267541" lon="120.0592813" />
   <node id="14211231350" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326710650" lon="120.059456183" />
   <node id="14211231351" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3264352" lon="120.0591854" />
@@ -16705,7 +16705,7 @@
   <node id="14211231354" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3267795" lon="120.0592670" />
   <node id="14211231355" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326721912" lon="120.059502548" />
   <node id="14211231356" visible="true" version="2" changeset="189483937" timestamp="2026-09-24T08:24:44Z" user="KnDOW" uid="24584477" lat="30.326445367" lon="120.059412685" />
-  <node id="14211231357" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326542367" lon="120.060279220" />
+  <node id="14211231357" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326529562" lon="120.060293112" />
   <node id="14211231358" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3253688" lon="120.0627231" />
   <node id="14211231359" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3255167" lon="120.0626441" />
   <node id="14211231360" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3258239" lon="120.0623848" />
@@ -16714,29 +16714,29 @@
   <node id="14211231363" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3268820" lon="120.0610667" />
   <node id="14211231364" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3269371" lon="120.0609731" />
   <node id="14211231365" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3249863" lon="120.0601447" />
-  <node id="14211231366" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.324940685" lon="120.059805085" />
+  <node id="14211231366" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3249443" lon="120.0598357" />
   <node id="14211231367" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3266982" lon="120.0606900" />
   <node id="14211231368" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3268688" lon="120.0607855" />
   <node id="14211231369" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3269093" lon="120.0608227" />
-  <node id="14211231370" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.326965618" lon="120.060845661">
+  <node id="14211231370" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3269498" lon="120.0608665">
     <tag k="highway" v="traffic_signals" />
     <tag k="traffic_signals" v="signal" />
     <tag k="traffic_signals:direction" v="both" />
   </node>
-  <node id="14211231371" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327110748" lon="120.060534978">
+  <node id="14211231371" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3271064" lon="120.0605556">
     <tag k="highway" v="traffic_signals" />
     <tag k="traffic_signals" v="signal" />
     <tag k="traffic_signals:direction" v="both" />
   </node>
-  <node id="14211231372" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327070073" lon="120.060635700" />
-  <node id="14211231373" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327256950" lon="120.061041561" />
-  <node id="14211231374" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327323240" lon="120.060964200" />
-  <node id="14211231375" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327414227" lon="120.060839881" />
-  <node id="14211231376" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327484621" lon="120.060707343" />
-  <node id="14211231377" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327395992" lon="120.060660738" />
-  <node id="14211231378" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327337240" lon="120.060634689" />
-  <node id="14211231379" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327296431" lon="120.060618157" />
-  <node id="14211231380" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.327157150" lon="120.060962952" />
+  <node id="14211231372" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3270648" lon="120.0606357" />
+  <node id="14211231373" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3272336" lon="120.0610624" />
+  <node id="14211231374" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3273255" lon="120.0609642" />
+  <node id="14211231375" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3274195" lon="120.0608503" />
+  <node id="14211231376" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3274447" lon="120.0608098" />
+  <node id="14211231377" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3273395" lon="120.0607302" />
+  <node id="14211231378" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3273007" lon="120.0606995" />
+  <node id="14211231379" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3272776" lon="120.0606772" />
+  <node id="14211231380" visible="true" version="1" changeset="189479045" timestamp="2026-09-24T05:58:11Z" user="KnDOW" uid="24584477" lat="30.3271338" lon="120.0609890" />
   <way id="4856244" visible="true" version="12" changeset="156323557" timestamp="2024-09-07T17:57:25Z" user="Topiours" uid="21363326">
     <nd ref="5618748280" />
     <nd ref="3547394683" />

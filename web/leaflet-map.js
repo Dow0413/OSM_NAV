@@ -45,7 +45,7 @@ function setBaseMap(kind) {
   document.querySelector('.map-toolbar span').textContent = `${name} · 滚轮缩放 · 拖拽平移 · 任意点击设置起终点`;
 }
 
-const groupNames = ['features', 'roads', 'arrows', 'nodes', 'signals', 'labels', 'route', 'endpoints', 'robot', 'pcd_buildings'];
+const groupNames = ['features', 'roads', 'arrows', 'nodes', 'signals', 'labels', 'route', 'endpoints', 'robot', 'pcd_buildings', 'highlights'];
 const layers = Object.fromEntries(groupNames.map(name => [name, L.layerGroup().addTo(map)]));
 const roadStyle = {
   motorway: ['#f0cf6e', 7], trunk: ['#f1dc85', 6], primary: ['#f4e99e', 5],
@@ -77,6 +77,7 @@ let signalNavigation = null;
 let pcdMetadata = null;
 let pcdOverlayLayer = null;
 let pcdBuildingData = [];
+let designCategory = null;
 
 function updateStatus(text) {
   statusBox.textContent = text;
@@ -260,7 +261,7 @@ function updateSignalPanel() {
   const list = document.getElementById('signal-list');
   list.innerHTML = signalData.length ? signalData.map(signal => `
     <div class="signal-item">
-      <div class="signal-name"><b>${escapeHtml(signal.id)}</b><small>控制步行过街</small></div>
+      <div class="signal-name"><b>${escapeHtml(signal.id)}</b><small>${signal.controls_pedestrian_crossing ? '参与当前规划的步行过街信号' : '仅地图显示，不参与当前规划'}</small></div>
       <button type="button" class="${signal.state === 1 ? 'red' : 'green'}" data-signal-id="${escapeHtml(signal.id)}">${signal.state === 1 ? '1 红灯' : '0 绿灯'}</button>
     </div>`).join('') : '<p class="signal-note">当前 OSM 没有关联步行过街的交通信号灯。</p>';
   const display = document.getElementById('signal-runtime-status');
@@ -278,7 +279,9 @@ async function pollSignals() {
     const response = await fetch('/api/signals');
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
-    const visibleSignals = data.signals.filter(signal => signal.controls_pedestrian_crossing);
+    // Topology-setting selection changes only the planning graph. Every OSM
+    // traffic signal remains visible in the map and category-display panels.
+    const visibleSignals = data.signals;
     const changed = JSON.stringify(signalData) !== JSON.stringify(visibleSignals) ||
       signalNavigation?.holding_signal_id !== data.navigation?.holding_signal_id;
     signalData = visibleSignals;
@@ -286,6 +289,7 @@ async function pollSignals() {
     if (changed) {
       updateSignalPanel();
       drawSignalMarkers();
+      renderDesignPanel();
     }
   } catch (error) {
     document.getElementById('signal-runtime-status').textContent = `读取信号灯失败：${error}`;
@@ -305,16 +309,75 @@ document.getElementById('signal-list').addEventListener('click', async event => 
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || response.statusText);
-    signalData = data.signals.filter(item => item.controls_pedestrian_crossing);
+    signalData = data.signals;
     signalNavigation = data.navigation;
     updateSignalPanel();
     drawSignalMarkers();
+    renderDesignPanel();
   } catch (error) {
     document.getElementById('signal-runtime-status').textContent = `切换信号灯失败：${error}`;
   } finally {
     button.disabled = false;
   }
 });
+
+function roadCategoryLabel(kind) {
+  return {footway: '人行道', path: '小径', pedestrian: '步行街', steps: '台阶', living_street: '生活街道', service: '服务道路', residential: '居民区道路', unclassified: '未分类道路', track: '便道', tertiary: '次干道', secondary: '二级道路', primary: '主干道'}[kind] || kind;
+}
+
+function designCategories() {
+  if (!mapData) return [];
+  const categories = [{id: null, label: '清除高亮'}];
+  for (const kind of [...new Set((mapData.roads || []).map(road => road.kind))].sort()) categories.push({id: `road:${kind}`, label: roadCategoryLabel(kind)});
+  categories.push({id: 'building', label: '建筑物'});
+  categories.push({id: 'area:all', label: '全部区域'});
+  if (displayMode === 'full') {
+    for (const kind of [...new Set((mapData.areas || []).map(area => area.kind))].sort()) categories.push({id: `area:${kind}`, label: `区域：${kind}`});
+  }
+  categories.push({id: 'signal', label: '交通信号点'});
+  return categories;
+}
+
+function renderDesignPanel() {
+  const roads = document.getElementById('design-road-list');
+  const features = document.getElementById('design-feature-list');
+  const clear = document.getElementById('design-clear');
+  if (!roads || !features || !clear) return;
+  roads.replaceChildren(); features.replaceChildren();
+  for (const category of designCategories()) {
+    if (category.id === null) continue;
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = category.label;
+    button.classList.toggle('active', category.id === designCategory);
+    button.addEventListener('click', () => selectDesignCategory(category.id));
+    (category.id.startsWith('road:') ? roads : features).append(button);
+  }
+  clear.classList.toggle('active', designCategory === null);
+  clear.onclick = () => selectDesignCategory(null);
+}
+
+function drawDesignHighlight() {
+  if (!designCategory) return;
+  const [type, kind] = designCategory.split(':');
+  if (type === 'road') {
+    for (const road of mapData.roads || []) if (road.kind === kind) L.polyline(road.coordinates, {renderer: vectorRenderer, color: '#d94b42', weight: 6, opacity: .95, lineCap: 'round', interactive: false}).addTo(layers.highlights);
+  } else if (type === 'building') {
+    for (const building of mapData.buildings || []) L.polygon(building.coordinates, {renderer: vectorRenderer, color: '#d94b42', fillColor: '#ff7b72', fillOpacity: .58, weight: 2, interactive: false}).addTo(layers.highlights);
+  } else if (type === 'area') {
+    for (const area of mapData.areas || []) if (kind === 'all' || area.kind === kind) L.polygon(area.coordinates, {renderer: vectorRenderer, color: '#d94b42', fillColor: '#ffb347', fillOpacity: .45, weight: 2, interactive: false}).addTo(layers.highlights);
+  } else if (type === 'signal') {
+    for (const signal of signalData) L.circleMarker([signal.latitude, signal.longitude], {renderer: vectorRenderer, radius: 9, color: '#fff', fillColor: '#d94b42', fillOpacity: 1, weight: 3, interactive: false}).addTo(layers.highlights);
+  }
+}
+
+function selectDesignCategory(category) {
+  designCategory = category;
+  const needsFull = category && !category.startsWith('road:');
+  if (needsFull && displayMode !== 'full') {
+    displayMode = 'full'; updateDisplayMode(); loadMap(); return;
+  }
+  renderMap(); renderDesignPanel();
+}
 
 function drawRoute() {
   if (!layerSettings.route || !lastRoute) return;
@@ -342,6 +405,7 @@ function renderMap() {
   drawFeatures();
   (mapData.roads || []).forEach(drawRoad);
   drawPoints();
+  drawDesignHighlight();
   drawRoute();
   drawEndpoints();
   drawPcdBuildings();
@@ -472,6 +536,7 @@ async function loadMap() {
     lastRoute = null;
     navigate.disabled = true;
     renderMap();
+    renderDesignPanel();
     updateStatus(displayMode === 'compact' ? '卫星底图与简略道路图已加载。点击地图选择起点。' : '卫星底图与全部地图要素已加载。点击地图选择起点。');
   } catch (error) {
     updateStatus(`地图加载失败：${error}`);

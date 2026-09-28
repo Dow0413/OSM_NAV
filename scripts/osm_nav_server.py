@@ -34,7 +34,7 @@ for module_root in (SCRIPT_DIR / "src", SCRIPT_DIR.parent / "src"):
         sys.path.insert(0, str(module_root))
 
 from roading import OSMRoadNetwork
-from traffic_rules import DEFAULT_ROBOT_DOG_SPEED_MPS, DEFAULT_SIGNAL_WAIT_SECONDS, SAFETY_MULTIPLIER
+from traffic_rules import load_topo_setting
 
 from pcd_overlay import PcdOverlay
 
@@ -307,8 +307,9 @@ class RosNavigationBridge(Node):
 class OSMMapEditor:
     """Mutable OSM node editor. Writes only after an explicit save request."""
 
-    def __init__(self, map_path):
+    def __init__(self, map_path, pair_files_dir):
         self.map_path = Path(map_path).resolve()
+        self.pair_files_dir = Path(pair_files_dir).resolve()
         self._lock = threading.Lock()
 
     def data(self, pcd_overlay, frame):
@@ -355,6 +356,73 @@ class OSMMapEditor:
             "areas": areas,
             "signals": signal_ids,
         }
+
+    def export_pairs(self, pcd_overlay, selections):
+        """Write explicitly selected OSM/PCD correspondences as a new YAML file."""
+        if pcd_overlay is None:
+            raise ValueError("PCD overlay is disabled")
+        if not isinstance(selections, list) or not selections:
+            raise ValueError("selections must contain at least one OSM node")
+        if len(selections) > 10_000:
+            raise ValueError("a single export may contain at most 10000 pairs")
+        if not self.pair_files_dir.is_dir():
+            raise ValueError(f"pair files directory does not exist: {self.pair_files_dir}")
+        with self._lock:
+            root = ET.parse(self.map_path).getroot()
+            known_ids = {node.attrib.get("id") for node in root.findall("node")}
+            pairs, selected_ids = [], set()
+            for index, selection in enumerate(selections):
+                if not isinstance(selection, dict):
+                    raise ValueError("each selected pair must be an object")
+                node_id = str(selection.get("id", ""))
+                if not node_id or node_id not in known_ids:
+                    raise ValueError(f"unknown OSM node: {node_id}")
+                if node_id in selected_ids:
+                    raise ValueError(f"OSM node selected more than once: {node_id}")
+                try:
+                    east, north = float(selection["east"]), float(selection["north"])
+                except (KeyError, TypeError, ValueError) as error:
+                    raise ValueError(f"selected node {node_id} requires numeric East/North") from error
+                if not math.isfinite(east) or not math.isfinite(north):
+                    raise ValueError("selected node coordinates must be finite")
+                latitude, longitude = pcd_overlay.to_lla(east, north)
+                pairs.append({
+                    "world": [east, north],
+                    "gps": [latitude, longitude],
+                })
+                selected_ids.add(node_id)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            target = self.pair_files_dir / f"paired_{stamp}.yaml"
+            suffix = 1
+            while target.exists():
+                target = self.pair_files_dir / f"paired_{stamp}_{suffix}.yaml"
+                suffix += 1
+            def number(value):
+                text = f"{float(value):.9f}".rstrip("0").rstrip(".")
+                return text if "." in text else text + ".0"
+
+            lines = [
+                "# Coordinate pairs for mode: 1.\n#\n",
+                "# world is the SLAM/map coordinate in metres: [x, y]\n",
+                "# gps is the WGS-84 geographic coordinate in degrees: [latitude, longitude]\n#\n",
+                "# Enter at least three non-collinear, accurately surveyed pairs. Four or more\n",
+                "# pairs are recommended because the affine transform is fitted by least squares.\n",
+                "pairs:\n",
+            ]
+            for index, pair in enumerate(pairs):
+                lines.extend((
+                    f'  - id: "p{index}"\n',
+                    f'    world: [{number(pair["world"][0])}, {number(pair["world"][1])}]\n',
+                    f'    gps: [{number(pair["gps"][0])}, {number(pair["gps"][1])}]\n',
+                ))
+                if index != len(pairs) - 1:
+                    lines.append("\n")
+            content = "".join(lines)
+            temporary = target.with_suffix(target.suffix + ".tmp")
+            temporary.write_text(content, encoding="utf-8")
+            temporary.replace(target)
+        return {"pair_count": len(pairs), "file": target.name,
+                "path": str(target), "mode_1_ready": len(pairs) >= 3}
 
     def save(self, pcd_overlay, edits):
         if not isinstance(edits, list) or not edits:
@@ -501,6 +569,20 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
 
         def do_POST(self):
             request = urlparse(self.path)
+            if request.path == "/api/editor/export-pairs":
+                try:
+                    if map_editor is None:
+                        raise ValueError("OSM editor is unavailable")
+                    content_length = int(self.headers.get("Content-Length", "0"))
+                    if not 0 < content_length <= 2_000_000:
+                        raise ValueError("pair export body must be between 1 and 2000000 bytes")
+                    payload = json.loads(self.rfile.read(content_length))
+                    if not isinstance(payload, dict):
+                        raise ValueError("pair export request must be a JSON object")
+                    self.send_json(map_editor.export_pairs(pcd_overlay, payload.get("selections")))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
+                return
             if request.path == "/api/editor/save":
                 try:
                     if map_editor is None:
@@ -545,9 +627,11 @@ def main():
     parser.add_argument("--map", type=Path, default=default_map_path(), help="Standard OSM map file")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8090)
-    parser.add_argument("--robot-dog-speed-mps", type=float, default=DEFAULT_ROBOT_DOG_SPEED_MPS)
-    parser.add_argument("--signal-wait-seconds", type=float, default=DEFAULT_SIGNAL_WAIT_SECONDS)
-    parser.add_argument("--safety-multipliers", default=json.dumps(SAFETY_MULTIPLIER))
+    parser.add_argument("--topo-setting-yaml", type=Path, required=True,
+                        help="Scenario profile YAML (topo_setting.yaml)")
+    # Keep the spelling aligned with the existing osm_nav.yaml parameter.
+    parser.add_argument("--topo-setting-chose", required=True,
+                        help="Selected scene name, for example walk or car")
     parser.add_argument("--default-display-mode", choices=("compact", "full"), default="compact")
     parser.add_argument("--min-zoom-width", type=float, default=DEFAULT_MIN_ZOOM_WIDTH)
     parser.add_argument("--use-base-map", choices=("openstreetmap", "esri_satellite", "none"), default="esri_satellite")
@@ -560,24 +644,24 @@ def main():
     parser.add_argument("--stop-override-topic", default="/cmd_vel/final_align")
     parser.add_argument("--signal-stop-distance-m", type=float, default=DEFAULT_SIGNAL_STOP_DISTANCE_M)
     parser.add_argument("--pcd-overlay", type=parse_bool, default=False)
-    parser.add_argument("--pcd-dir", default="")
-    parser.add_argument("--manifest-yaml-dir", default="")
+    parser.add_argument("--pcd", default="", help="PCD map file path")
+    parser.add_argument("--manifest-yaml", default="", help="PCD manifest YAML file path")
+    parser.add_argument("--pair-files-dir", type=Path, required=True,
+                        help="Directory for timestamped paired_*.yaml exports")
     args = parser.parse_args()
     if not args.map.is_file():
         parser.error(f"map file does not exist: {args.map}")
-    if args.robot_dog_speed_mps <= 0 or args.signal_wait_seconds < 0 or args.min_zoom_width <= 0 or args.signal_stop_distance_m <= 0:
-        parser.error("speed, minimum zoom width and signal stop distance must be positive; signal wait cannot be negative")
-    server = None
+    if args.min_zoom_width <= 0 or args.signal_stop_distance_m <= 0:
+        parser.error("minimum zoom width and signal stop distance must be positive")
     try:
-        safety_multipliers = json.loads(args.safety_multipliers)
-        if not isinstance(safety_multipliers, dict):
-            raise ValueError("must be a JSON object")
-        safety_multipliers = {str(key): float(value) for key, value in safety_multipliers.items()}
-    except (ValueError, TypeError, json.JSONDecodeError) as error:
-        parser.error(f"invalid --safety-multipliers: {error}")
+        topo_setting = load_topo_setting(args.topo_setting_yaml, args.topo_setting_chose)
+    except ValueError as error:
+        parser.error(f"invalid topology setting: {error}")
+    server = None
 
     network = OSMRoadNetwork(
-        args.map, args.robot_dog_speed_mps, args.signal_wait_seconds, safety_multipliers,
+        args.map, topo_setting["speed_mps"], topo_setting["signal_wait_seconds"],
+        topo_setting["safety_multipliers"],
         {
             "default_display_mode": args.default_display_mode,
             "min_zoom_width": args.min_zoom_width,
@@ -585,14 +669,20 @@ def main():
             "mode": args.mode,
             "global_path_topic": args.global_path_topic,
             "signal_stop_distance_m": args.signal_stop_distance_m,
+            "topo_setting": {
+                "name": topo_setting["name"],
+                "speed_mps": topo_setting["speed_mps"],
+                "allowed_road_types": sorted(topo_setting["allowed_road_types"]),
+            },
         },
+        allowed_road_types=topo_setting["allowed_road_types"],
     )
     pcd_overlay = None
     if args.pcd_overlay:
-        if not args.pcd_dir or not args.manifest_yaml_dir:
-            parser.error("--pcd-dir and --manifest-yaml-dir are required when --pcd-overlay is true")
+        if not args.pcd or not args.manifest_yaml:
+            parser.error("--pcd and --manifest-yaml are required when --pcd-overlay is true")
         try:
-            pcd_overlay = PcdOverlay(args.pcd_dir, args.manifest_yaml_dir)
+            pcd_overlay = PcdOverlay(args.pcd, args.manifest_yaml)
         except (OSError, KeyError, ValueError) as error:
             parser.error(f"cannot load PCD overlay: {error}")
     ros_bridge = None
@@ -621,13 +711,15 @@ def main():
     network.ui_config["transform"] = transform_metadata
     try:
         server = ThreadingHTTPServer(
-            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map))
+            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map, args.pair_files_dir))
         )
     except OSError as error:
         if error.errno == errno.EADDRINUSE:
             parser.error(f"port {args.port} is already in use; close the existing server or choose --port <number>")
         raise
     print(f"Map: {args.map}")
+    print(f"Topology setting: {topo_setting['name']} (speed {topo_setting['speed_mps']} m/s; "
+          f"roads: {', '.join(sorted(topo_setting['allowed_road_types']))})")
     print(f"Open http://{args.host}:{args.port}")
     try:
         server.serve_forever()

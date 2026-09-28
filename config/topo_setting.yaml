@@ -1,0 +1,42 @@
+# 规划道路类别对照（在某场景的 safety_multipliers 中列出，即允许该场景使用）：
+# - footway：人行道
+# - pedestrian：步行街／行人专用道路
+# - path：通用小径
+# - steps：台阶
+# - living_street：人车共享生活街道
+# - service：服务道路（停车场、园区内部道路等）
+# - residential：居住区道路
+# - unclassified：未分类普通道路
+# - track：乡间、林业或农业便道
+# - tertiary：次级干道
+# - secondary：二级道路
+# - primary：主干道
+#
+# speed_mps 为规划时采用的速度；safety_multipliers 为道路代价倍率。
+# 倍率越小越优先，未列出的道路类别不会进入该场景的规划拓扑。
+
+walk:
+  speed_mps: 1.0
+  safety_multipliers:
+    footway: 1.0        # 人行道；最低代价，优先通行
+    pedestrian: 1.0     # 步行街/行人专用道路；最低代价，优先通行
+    path: 1.0           # 通用小径；略低于人行道的优先级
+    steps: 1.0          # 台阶；可通行但对机器狗代价更高
+    living_street: 1.0  # 人车共享生活街道；低速环境，较推荐
+    service: 1.0        # 服务道路，如停车场/园区内部道路
+    residential: 1.0    # 居民区道路；需与车辆共享
+    unclassified: 1.0   # 未分类的普通道路；道路属性不明确
+    track: 1.0          # 乡间、林业或农业便道；路况通常较差
+
+car:
+  speed_mps: 9.0
+  safety_multipliers:
+    path: 1.0           # 通用小径；略低于人行道的优先级
+    living_street: 1.0  # 人车共享生活街道；低速环境，较推荐
+    service: 1.0        # 服务道路，如停车场/园区内部道路
+    residential: 1.0    # 居民区道路；需与车辆共享
+    unclassified: 1.0   # 未分类的普通道路；道路属性不明确
+    track: 1.0          # 乡间、林业或农业便道；路况通常较差
+    tertiary: 1.0       # 次级干道；车流相对更多，尽量避免
+    secondary: 1.0      # 二级道路；车流较大，进一步降低优先级
+    primary: 1.0        # 主干道；最高代价，仅在没有更安全路线时使用

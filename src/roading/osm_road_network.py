@@ -27,12 +27,13 @@ class OSMRoadNetwork:
 
     def __init__(self, map_path, robot_dog_speed_mps=DEFAULT_ROBOT_DOG_SPEED_MPS,
                  signal_wait_seconds=DEFAULT_SIGNAL_WAIT_SECONDS, safety_multipliers=None,
-                 ui_config=None):
+                 ui_config=None, allowed_road_types=None):
         self.map_path = Path(map_path)
         self.robot_dog_speed_mps = robot_dog_speed_mps
         self.signal_wait_seconds = signal_wait_seconds
         self.safety_multipliers = dict(SAFETY_MULTIPLIER)
         self.safety_multipliers.update(safety_multipliers or {})
+        self.allowed_road_types = set(allowed_road_types) if allowed_road_types else None
         self.ui_config = ui_config or {}
         root = ET.parse(map_path).getroot()
         self.nodes = {n.attrib["id"]: (float(n.attrib["lat"]), float(n.attrib["lon"])) for n in root.findall("node")}
@@ -65,7 +66,9 @@ class OSMRoadNetwork:
             road_type = way_tags.get("highway")
             if road_type:
                 self.roads.append({"coordinates": coordinates, "kind": road_type, "name": way_tags.get("name", ""), "oneway": way_tags.get("oneway", ""), "lanes": way_tags.get("lanes", ""), "maxspeed": way_tags.get("maxspeed", "")})
-            if not is_walkable(road_type, way_tags) or len(references) < 2:
+            if (not is_walkable(road_type, way_tags)
+                    or (self.allowed_road_types is not None and road_type not in self.allowed_road_types)
+                    or len(references) < 2):
                 continue
             one_way = robot_dog_oneway(road_type, way_tags)
             pairs = list(zip(references, references[1:]))
@@ -113,7 +116,7 @@ class OSMRoadNetwork:
         return {"bounds": self.bounds, "detail": "full", "roads": self.roads, "buildings": self.buildings, "areas": self.areas, "nodes": [[i, *p] for i, p in self.nodes.items()], "traffic_signals": [[i, *self.nodes[i]] for i in sorted(self.traffic_signal_nodes)]}
 
     def config_data(self):
-        return {"map_name": self.map_path.name, "default_display_mode": self.ui_config.get("default_display_mode", "compact"), "min_zoom_width": self.ui_config.get("min_zoom_width", DEFAULT_MIN_ZOOM_WIDTH), "use_base_map": self.ui_config.get("use_base_map", "esri_satellite"), "mode": self.ui_config.get("mode", 0), "global_path_topic": self.ui_config.get("global_path_topic", "/global_path"), "transform": self.ui_config.get("transform"), "signal_stop_distance_m": self.ui_config.get("signal_stop_distance_m", DEFAULT_SIGNAL_STOP_DISTANCE_M)}
+        return {"map_name": self.map_path.name, "default_display_mode": self.ui_config.get("default_display_mode", "compact"), "min_zoom_width": self.ui_config.get("min_zoom_width", DEFAULT_MIN_ZOOM_WIDTH), "use_base_map": self.ui_config.get("use_base_map", "esri_satellite"), "mode": self.ui_config.get("mode", 0), "global_path_topic": self.ui_config.get("global_path_topic", "/global_path"), "transform": self.ui_config.get("transform"), "signal_stop_distance_m": self.ui_config.get("signal_stop_distance_m", DEFAULT_SIGNAL_STOP_DISTANCE_M), "topo_setting": self.ui_config.get("topo_setting")}
 
     def signal_state(self, signal_id):
         with self._signal_lock: return self.signal_states[signal_id]

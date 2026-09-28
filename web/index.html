@@ -26,18 +26,43 @@
     .legend { display: flex; flex-wrap: wrap; gap: 11px; padding: 11px 15px; border-top: 1px solid #e1e8eb; color: #5a6d77; font-size: 12px; } .legend i { display: inline-block; width: 18px; height: 4px; margin-right: 4px; vertical-align: middle; border-radius: 3px; } .legend .dot { width: 9px; height: 9px; border-radius: 50%; }
     .road, .route, .projection-link { fill: none; stroke-linecap: round; stroke-linejoin: round; } .projection-link { stroke: #65747b; stroke-dasharray: 4 4; opacity: .9; } .coordinate-pin { fill: #9653b6; stroke: #fff; } .building { fill: #d9cec5; stroke: #9a8f87; } .area { } .node { fill: #3f5260; opacity: .6; } .traffic-signal { fill: #f5cc45; stroke: #514011; } .route { stroke: #d94b42; } .start { fill: #269c53; stroke: #183243; } .goal { fill: #1c73bc; stroke: #183243; } .map-label { fill: #47545b; font-size: 12px; font-weight: 600; paint-order: stroke; stroke: #ffffffd9; stroke-linejoin: round; pointer-events: none; } .road-label { fill: #5a4b22; font-size: 10px; font-weight: 700; paint-order: stroke; stroke: #fffde8e8; pointer-events: none; }
     @media (max-width: 900px) { body { overflow: auto; } main { flex: 0 0 auto; grid-template-columns: 1fr; } .sidebar { height: auto; overflow: visible; } .map-card { height: min(72vh, 720px); } } @media (max-width: 600px) { .sidebar .panel + .panel { margin-top: 2px; } .map-card { height: 64vh; min-height: 420px; } } @media (max-width: 500px) { main { padding: 0 10px; margin: 12px auto; } #map { min-height: 430px; } .map-toolbar span { display: none; } }
-      /* Compact title and icon-driven menu layout. */
+      .design-note { margin: 0 0 10px; color: #607683; font-size: 12px; line-height: 1.5; }
+    .category-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #e5ecef; } .category-section h3 { margin: 0 0 8px; color: #315464; font-size: 13px; }
+    .design-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; }
+    .design-list button { min-width: 0; padding: 8px 7px; border: 1px solid #cbdbe1; border-radius: 7px; background: #f8fbfc; color: #315464; font: inherit; font-size: 12px; cursor: pointer; overflow-wrap: anywhere; }
+    .design-list button:hover { background: #eaf5f8; } .design-list button.active { background: #d94b42; border-color: #d94b42; color: #fff; font-weight: 650; }
+    /* Compact title and icon-driven menu layout. */
     header { padding: 7px clamp(20px, 5vw, 64px); }
     header h1 { font-size: clamp(17px, 1.7vw, 21px); }
     header p { margin-top: 2px; font-size: 11px; }
     main { grid-template-columns: minmax(340px, 420px) minmax(0, 1fr); }
     .sidebar { display: grid; grid-template-columns: 60px minmax(0, 1fr); grid-auto-rows: min-content; align-content: start; gap: 0 10px; }
     .sidebar > .panel { grid-column: 2; min-width: 0; }
-    .side-nav { grid-column: 1; grid-row: 1 / span 5; position: sticky; top: 0; display: grid; align-content: start; gap: 8px; padding: 4px 0; }
+    .side-nav { grid-column: 1; grid-row: 1 / span 6; position: sticky; top: 0; display: grid; align-content: start; gap: 8px; padding: 4px 0; }
     .side-nav button { width: 52px; min-height: 52px; display: grid; place-items: center; gap: 2px; padding: 5px 2px; border: 1px solid #cddde3; border-radius: 11px; background: #f8fbfc; color: #52707e; font: inherit; cursor: pointer; }
     .side-nav button:hover { background: #eaf5f8; } .side-nav button.active { background: #167294; border-color: #167294; color: #fff; box-shadow: 0 4px 12px #16729440; }
     .side-nav .menu-icon { font-size: 19px; line-height: 1; } .side-nav .menu-label { font-size: 10px; line-height: 1.15; }
     details.panel { display: none; } details.panel.menu-active { display: block; } details.panel summary { pointer-events: none; min-height: 48px; } details.panel summary::after { display: none; }
+    /* Compact desktop density: reserve more width for the map. */
+    body { font-size: 14px; }
+    main { margin: 10px auto; padding: 0 16px; gap: 16px; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); }
+    .panel { padding: 12px; }
+    h2 { font-size: 16px; }
+    .map-toolbar { min-height: 46px; padding: 9px 12px; }
+    .map-toolbar strong { font-size: 14px; } .map-toolbar span { font-size: 12px; }
+    .status { padding: 10px; min-height: 62px; font-size: 13px; }
+    .steps { margin: 10px 0 4px; font-size: 12px; line-height: 1.55; }
+    button.action, .editor-link { margin-top: 9px; padding: 9px 12px; }
+    .setting { padding: 10px 0; } .setting label { font-size: 12px; }
+    details.panel summary { min-height: 44px; padding: 12px; }
+    .panel-content, .rule-content { padding: 0 12px 12px; }
+    .rule { font-size: 12px; }
+    .sidebar { grid-template-columns: 54px minmax(0, 1fr); gap: 0 8px; }
+    .side-nav button { width: 46px; min-height: 46px; padding: 4px 1px; border-radius: 9px; }
+    .side-nav .menu-icon { font-size: 18px; } .side-nav .menu-label { font-size: 9px; }
+    header h1 { font-size: clamp(16px, 1.55vw, 20px); }
+    header p { font-size: 10px; }
+
     @media (max-width: 900px) { .side-nav { position: static; } }
   </style>
 </head>
@@ -49,8 +74,9 @@
       <button class="active" type="button" data-menu-target="display" aria-label="显示设置" title="显示设置"><span class="menu-icon">◉</span><span class="menu-label">显示</span></button>
       <button type="button" data-menu-target="navigation" aria-label="导航控制" title="导航控制"><span class="menu-icon">⌖</span><span class="menu-label">导航</span></button>
       <button type="button" data-menu-target="traffic" aria-label="模拟交通" title="模拟交通"><span class="menu-icon">🚦</span><span class="menu-label">交通</span></button>
-      <button type="button" data-menu-target="pcd" aria-label="点云显示" title="点云显示"><span class="menu-icon">◌</span><span class="menu-label">点云</span></button>
       <button type="button" data-menu-target="rules" aria-label="交通规则" title="交通规则"><span class="menu-icon">⚖</span><span class="menu-label">规则</span></button>
+      <button type="button" data-menu-target="design" aria-label="类别显示" title="类别显示"><span class="menu-icon">⌘</span><span class="menu-label">类别</span></button>
+      <button type="button" data-menu-target="pcd" aria-label="点云显示" title="点云显示"><span class="menu-icon">◌</span><span class="menu-label">点云</span></button>
     </nav>
     <details class="panel menu-active" data-menu-panel="display" open><summary><h2>显示设置</h2></summary><div class="panel-content">
       <div class="setting"><label>鼠标当前位置</label><div id="hover-coordinate" class="coordinate-readout">纬度：--<br>经度：--</div></div>
@@ -71,6 +97,12 @@
     <details class="panel" data-menu-panel="navigation"><summary><h2>导航控制</h2></summary><div class="panel-content"><div id="status" class="status">正在加载地图…</div><ol class="steps"><li>在地图任意位置点击设置起点</li><li>再次点击设置终点</li><li>点击“开启导航”</li></ol><button id="navigate" class="action" disabled>开启导航</button><button id="reset" class="action secondary">重新选择起终点</button></div></details>
     <details class="panel rule-panel" data-menu-panel="rules"><summary><h2>机器狗基础通行规则</h2></summary><div class="rule-content"><div class="rule"><span class="rule-dot"></span><div><b>步行设施优先</b><br>优先使用人行道、步行街、小径和过街设施；共享道路会增加安全代价，只有没有更好连接时才优先级较低地使用。</div></div><div class="rule"><span class="rule-dot"></span><div><b>禁行与专用路</b><br>排除 <code>foot=no</code>、<code>foot=use_sidepath</code>、<code>access=no</code>、<code>access=private</code>，且不进入高速和快速道路。</div></div><div class="rule"><span class="rule-dot"></span><div><b>道路方向</b><br>在人行道、步行道上双向通行，除非有 <code>oneway:foot</code>；在共享机动车道路上遵守 OSM 的 <code>oneway</code> 方向，避免逆向通行。</div></div><div class="rule"><span class="rule-dot"></span><div><b>交通信号与过街</b><br>红灯（1）在进入有交通信号的步行过街路段前等待；绿灯（0）恢复原路径。仅关联步行类路段的信号灯参与停车。</div></div><div class="rule warn"><span class="rule-dot"></span><div><b>演示边界</b><br>灯色由网页手动设置；后续可替换为视觉识别。真实运行仍需验证定位、制动距离和现场交通条件。</div></div></div></details>
     <details class="panel" data-menu-panel="traffic"><summary><h2>模拟交通信号灯</h2></summary><div class="panel-content"><p class="signal-note">仅显示关联步行过街的信号灯。逐灯切换：1 为红灯、0 为绿灯，默认红灯。</p><div id="signal-runtime-status">正在读取信号灯…</div><div id="signal-list"></div></div></details>
+    <details class="panel" data-menu-panel="design"><summary><h2>类别显示</h2></summary><div class="panel-content">
+      <p class="design-note">选择类别后，地图会用红色高亮该类别。建筑、区域和信号点需要“全部显示”地图数据，会自动加载。</p>
+      <section class="category-section"><h3>线路道路</h3><div id="design-road-list" class="design-list" aria-label="道路类别高亮"></div></section>
+      <section class="category-section"><h3>建筑与区域</h3><div id="design-feature-list" class="design-list" aria-label="建筑、区域与信号点高亮"></div></section>
+      <button id="design-clear" class="action secondary" type="button">清除高亮</button>
+    </div></details>
     <details class="panel" data-menu-panel="pcd"><summary><h2>点云与 OSM 建筑对齐</h2></summary><div class="panel-content"><p class="signal-note">将 PCD 俯视投影（青色）叠到底图上，与 OSM 建筑轮廓（橙色）比较。此图层只用于检查，不参与路径规划。</p><label class="pcd-check"><input id="pcd-visible" type="checkbox">显示 PCD 点云投影</label><label class="pcd-check"><input id="pcd-buildings" type="checkbox" checked>显示 OSM 建筑轮廓</label><label class="pcd-control">点云坐标解释<select id="pcd-frame"><option value="raw">原始 XY 已是 ENU</option><option value="aligned">PCD 应用 t_align 后为 ENU</option><option value="inverse">PCD 应用 t_align 逆变换后为 ENU</option></select></label><label class="pcd-control">显示点<select id="pcd-height"><option value="high">高度 z ≥ 3 m（突出建筑）</option><option value="all">全部点（包含地面）</option></select></label><label class="pcd-control">点云透明度 <output id="pcd-opacity-value">65%</output><input id="pcd-opacity" type="range" min="0" max="100" value="65"></label><button id="pcd-fit" class="action secondary" type="button">缩放到点云范围</button><a class="action editor-link" href="pcd_editor.html">打开 3D PCD / OSM 校图</a><div id="pcd-info">正在检查 PCD 地图…</div></div></details>
   </aside>
   <section class="map-card">

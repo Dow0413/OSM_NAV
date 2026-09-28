@@ -14,7 +14,7 @@ install(DIRECTORY src/
   DESTINATION lib/${PROJECT_NAME}/src
   PATTERN "__pycache__" EXCLUDE
 )
-install(DIRECTORY web config launch maps
+install(DIRECTORY web config launch maps pair_files
   DESTINATION share/${PROJECT_NAME}
 )
 

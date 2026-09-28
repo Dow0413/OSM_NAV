@@ -16,9 +16,18 @@ PCD_FIELDS = ("x", "y", "z", "intensity")
 
 
 class PcdOverlay:
-    def __init__(self, pcd_dir, manifest_yaml_dir, sample_step=4, pixel_size_m=0.5):
-        pcd_dir = Path(pcd_dir)
-        manifest_path = Path(manifest_yaml_dir) / "manifest.yaml"
+    def __init__(self, pcd, manifest_yaml, sample_step=4, pixel_size_m=0.5):
+        pcd_path = Path(pcd)
+        manifest_path = Path(manifest_yaml)
+        # Prefer explicit PCD and manifest file paths, as used in osm_nav.yaml.
+        # Directory inputs remain accepted while existing launch commands migrate.
+        if pcd_path.is_dir():
+            pcd_dir = pcd_path
+            manifest_path = manifest_path / "manifest.yaml" if manifest_path.is_dir() else manifest_path
+        else:
+            pcd_dir = pcd_path.parent
+        if not manifest_path.is_file():
+            raise ValueError(f"manifest YAML does not exist: {manifest_path}")
         manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(manifest, dict):
             raise ValueError(f"manifest is not a YAML mapping: {manifest_path}")
@@ -34,9 +43,14 @@ class PcdOverlay:
             raise ValueError("t_align is not a homogeneous 4x4 transform")
         self.inverse_matrix = np.linalg.inv(self.matrix)
         pcd_name = manifest.get("global_map_file")
-        if not isinstance(pcd_name, str) or not pcd_name or Path(pcd_name).is_absolute():
-            raise ValueError("manifest.yaml requires a relative global_map_file under pcd_dir")
-        self.map_path = pcd_dir / pcd_name
+        if pcd_path.is_dir():
+            if not isinstance(pcd_name, str) or not pcd_name or Path(pcd_name).is_absolute():
+                raise ValueError("manifest.yaml requires a relative global_map_file under the PCD directory")
+            self.map_path = pcd_dir / pcd_name
+        else:
+            self.map_path = pcd_path
+        if not self.map_path.is_file():
+            raise ValueError(f"PCD map does not exist: {self.map_path}")
         header = {}
         with self.map_path.open("rb") as stream:
             while True:

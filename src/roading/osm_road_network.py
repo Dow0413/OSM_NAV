@@ -205,6 +205,18 @@ class OSMRoadNetwork:
         transitions.setdefault(segment["start"], []).append((goal_key, first, segment["way_id"]))
         if segment["bidirectional"]:
             transitions.setdefault(segment["end"], []).append((goal_key, second, segment["way_id"]))
+
+        # If both projected points lie on one directed segment, they must be
+        # connected directly.  Without this edge Dijkstra can only leave the
+        # start projection through a segment endpoint and then return from an
+        # endpoint to the goal projection, producing an obvious detour.
+        same_segment = (start_segment["way_id"] == goal_segment["way_id"]
+                        and start_segment["start"] == goal_segment["start"]
+                        and start_segment["end"] == goal_segment["end"])
+        forward = goal_snap["fraction"] >= start_snap["fraction"]
+        if same_segment and (start_segment["bidirectional"] or forward):
+            direct_cost = distance_m(start_snap["coordinate"], goal_snap["coordinate"]) * start_segment["cost_per_m"]
+            transitions[start_key].append((goal_key, direct_cost, start_segment["way_id"]))
         return transitions, coordinates
 
     def route(self, start_point, goal_point):

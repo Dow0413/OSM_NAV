@@ -555,11 +555,105 @@ class OSMRuleEditor:
             backup=self._write(tree)
         return {"backup":backup,"restart_required":True}
 
+
+class OSMWebEditor:
+    """Transactional generic OSM node/way editor used by the 2-D web page."""
+    def __init__(self, map_path):
+        self.map_path = Path(map_path).resolve()
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _tags(element):
+        return {tag.attrib.get("k", ""): tag.attrib.get("v", "") for tag in element.findall("tag")}
+
+    @staticmethod
+    def _replace_tags(element, tags):
+        if not isinstance(tags, dict) or len(tags) > 100:
+            raise ValueError("tags must be an object with at most 100 entries")
+        cleaned = {}
+        for key, value in tags.items():
+            if not isinstance(key, str) or not isinstance(value, str) or not key.strip() or len(key) > 255 or len(value) > 4096:
+                raise ValueError("every OSM tag must be a non-empty string key and string value")
+            cleaned[key] = value
+        for tag in list(element.findall("tag")):
+            element.remove(tag)
+        for key, value in cleaned.items():
+            ET.SubElement(element, "tag", k=key, v=value)
+
+    def data(self):
+        root = ET.parse(self.map_path).getroot()
+        return {"map_name": self.map_path.name,
+                "nodes": [{"id": node.attrib["id"], "lat": float(node.attrib["lat"]), "lon": float(node.attrib["lon"]), "tags": self._tags(node)} for node in root.findall("node")],
+                "ways": [{"id": way.attrib["id"], "nodes": [nd.attrib["ref"] for nd in way.findall("nd")], "tags": self._tags(way)} for way in root.findall("way")]}
+
+    def save(self, payload):
+        if not isinstance(payload, dict): raise ValueError("editor payload must be an object")
+        names = ("node_updates", "node_additions", "way_updates", "way_additions", "node_deletions", "way_deletions")
+        changes = {name: payload.get(name, []) for name in names}
+        if any(not isinstance(value, list) for value in changes.values()): raise ValueError("every editor change list must be an array")
+        if sum(map(len, changes.values())) > 20_000: raise ValueError("a single save may contain at most 20000 changes")
+        with self._lock:
+            tree = ET.parse(self.map_path); root = tree.getroot()
+            nodes = {node.attrib.get("id"): node for node in root.findall("node")}
+            ways = {way.attrib.get("id"): way for way in root.findall("way")}
+            node_delete, way_delete = {str(v) for v in changes["node_deletions"]}, {str(v) for v in changes["way_deletions"]}
+            if not node_delete <= nodes.keys() or not way_delete <= ways.keys(): raise ValueError("a deleted node or way no longer exists")
+            numeric_ids = [int(v) for v in [*nodes, *ways] if v and v.lstrip("-").isdigit()]; next_id = min(numeric_ids + [0]) - 1
+            new_node_refs = {}
+            for item in changes["node_additions"]:
+                if not isinstance(item, dict) or not str(item.get("client_id", "")).startswith("new-"): raise ValueError("new nodes require a client_id beginning with new-")
+                client_id = str(item["client_id"])
+                if client_id in new_node_refs: raise ValueError("duplicate new node client_id")
+                lat, lon = float(item["lat"]), float(item["lon"])
+                if not math.isfinite(lat) or not math.isfinite(lon) or not -90 <= lat <= 90 or not -180 <= lon <= 180: raise ValueError("new node latitude/longitude is invalid")
+                node = ET.Element("node", id=str(next_id), lat=f"{lat:.9f}", lon=f"{lon:.9f}"); next_id -= 1
+                self._replace_tags(node, item.get("tags", {})); root.append(node); nodes[node.attrib["id"]] = node; new_node_refs[client_id] = node.attrib["id"]
+            for item in changes["node_updates"]:
+                if not isinstance(item, dict) or str(item.get("id", "")) not in nodes: raise ValueError("updated node does not exist")
+                node = nodes[str(item["id"])]; lat, lon = float(item["lat"]), float(item["lon"])
+                if not math.isfinite(lat) or not math.isfinite(lon) or not -90 <= lat <= 90 or not -180 <= lon <= 180: raise ValueError("updated node latitude/longitude is invalid")
+                node.set("lat", f"{lat:.9f}"); node.set("lon", f"{lon:.9f}"); self._replace_tags(node, item.get("tags", {}))
+            def refs(item):
+                values = [new_node_refs.get(str(v), str(v)) for v in item.get("nodes", [])]
+                if len(values) < 2 or any(v not in nodes for v in values): raise ValueError("a way needs at least two existing nodes")
+                return values
+            for item in changes["way_updates"]:
+                way_id = str(item.get("id", "")) if isinstance(item, dict) else ""
+                if way_id not in ways: raise ValueError("updated way does not exist")
+                way = ways[way_id]; values = refs(item)
+                for nd in list(way.findall("nd")): way.remove(nd)
+                for value in values: ET.SubElement(way, "nd", ref=value)
+                self._replace_tags(way, item.get("tags", {}))
+            for item in changes["way_additions"]:
+                if not isinstance(item, dict): raise ValueError("new way must be an object")
+                way = ET.Element("way", id=str(next_id)); next_id -= 1
+                for value in refs(item): ET.SubElement(way, "nd", ref=value)
+                self._replace_tags(way, item.get("tags", {})); root.append(way); ways[way.attrib["id"]] = way
+            removed_way_ids = set(way_delete)
+            for way_id, way in list(ways.items()):
+                if way_id in way_delete: continue
+                keep = [nd.attrib.get("ref") for nd in way.findall("nd") if nd.attrib.get("ref") not in node_delete]
+                if len(keep) < 2: removed_way_ids.add(way_id); continue
+                if len(keep) != len(way.findall("nd")):
+                    for nd in list(way.findall("nd")): way.remove(nd)
+                    for value in keep: ET.SubElement(way, "nd", ref=value)
+            for way_id in removed_way_ids:
+                if ways.get(way_id) in root: root.remove(ways[way_id])
+            for node_id in node_delete:
+                if nodes[node_id] in root: root.remove(nodes[node_id])
+            for relation in list(root.findall("relation")):
+                if any((m.attrib.get("type") == "node" and m.attrib.get("ref") in node_delete) or (m.attrib.get("type") == "way" and m.attrib.get("ref") in removed_way_ids) for m in relation.findall("member")): root.remove(relation)
+            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ"); backup = self.map_path.with_name(f"{self.map_path.stem}.{stamp}.bak{self.map_path.suffix}"); suffix = 1
+            while backup.exists(): backup = self.map_path.with_name(f"{self.map_path.stem}.{stamp}.{suffix}.bak{self.map_path.suffix}"); suffix += 1
+            shutil.copy2(self.map_path, backup); ET.indent(tree, space="  ")
+            temporary = self.map_path.with_suffix(self.map_path.suffix + ".tmp"); tree.write(temporary, encoding="utf-8", xml_declaration=True); temporary.replace(self.map_path)
+        return {"backup": backup.name, "restart_required": True, "removed_ways": len(removed_way_ids), "removed_nodes": len(node_delete)}
+
 def default_map_path():
     return Path(get_package_share_directory("osm_nav")) / "maps" / "0924_4.osm"
 
 
-def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, map_editor=None, rule_editor=None):
+def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, map_editor=None, rule_editor=None, osm_web_editor=None):
     web_dir = web_dir.resolve()
 
     class Handler(BaseHTTPRequestHandler):
@@ -598,6 +692,13 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
                 return
             if request.path == "/api/pcd":
                 self.send_json(pcd_overlay.metadata() if pcd_overlay else {"available": False})
+                return
+            if request.path == "/api/osm-editor/data":
+                try:
+                    if osm_web_editor is None: raise ValueError("OSM web editor is unavailable")
+                    self.send_json(osm_web_editor.data())
+                except ValueError as error:
+                    self.send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST)
                 return
             if request.path == "/api/editor/data":
                 try:
@@ -680,6 +781,16 @@ def make_handler(network, web_dir, mode=0, ros_bridge=None, pcd_overlay=None, ma
                     result=rule_editor.save_road(payload) if request.path.endswith("save-road") else rule_editor.add_turn_restriction(payload)
                     self.send_json(result)
                 except (ValueError, json.JSONDecodeError) as error:
+                    self.send_json({"error":str(error)},HTTPStatus.BAD_REQUEST)
+                return
+            if request.path == "/api/osm-editor/save":
+                try:
+                    if osm_web_editor is None: raise ValueError("OSM web editor is unavailable")
+                    content_length=int(self.headers.get("Content-Length","0"))
+                    if not 0 < content_length <= 10_000_000: raise ValueError("OSM editor request body must be between 1 and 10000000 bytes")
+                    payload=json.loads(self.rfile.read(content_length))
+                    self.send_json(osm_web_editor.save(payload))
+                except (KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
                     self.send_json({"error":str(error)},HTTPStatus.BAD_REQUEST)
                 return
             if request.path == "/api/editor/export-pairs":
@@ -831,7 +942,7 @@ def main():
     network.ui_config["transform"] = transform_metadata
     try:
         server = ThreadingHTTPServer(
-            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map, args.pair_files_dir), OSMRuleEditor(args.map))
+            (args.host, args.port), make_handler(network, package_share / "web", args.mode, ros_bridge, pcd_overlay, OSMMapEditor(args.map, args.pair_files_dir), OSMRuleEditor(args.map), OSMWebEditor(args.map))
         )
     except OSError as error:
         if error.errno == errno.EADDRINUSE:

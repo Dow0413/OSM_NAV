@@ -13,6 +13,7 @@ const map = L.map('map', {
   zoomControl: true,
   preferCanvas: true,
   maxBoundsViscosity: 1.0,
+  maxZoom: 20,
 });
 const vectorRenderer = L.canvas({padding: 0.5});
 map.createPane('pcdPane');
@@ -27,7 +28,7 @@ function setBaseMap(kind) {
   }
   if (kind === 'openstreetmap') {
     baseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 24,
+      maxZoom: 20,
       maxNativeZoom: 19,
       attribution: '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>',
     }).addTo(map);
@@ -35,7 +36,7 @@ function setBaseMap(kind) {
     baseLayer = L.tileLayer(
       'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
       {
-        maxZoom: 24,
+        maxZoom: 20,
         maxNativeZoom: 19,
         attribution: 'Tiles © Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community',
       },

@@ -16984,6 +16984,9 @@
   <way id="1561889609" visible="true" version="3" changeset="189666074" timestamp="2026-09-28T08:41:52Z" user="KnDOW" uid="24584477">
     <nd ref="14211231352" />
     <nd ref="14211231353" />
+    <nd ref="14211231354" />
+    <nd ref="14211231355" />
+    <nd ref="14211231356" />
     <tag k="highway" v="unclassified" />
   </way>
   <way id="1561889610" visible="true" version="2" changeset="189479145" timestamp="2026-09-24T06:02:39Z" user="KnDOW" uid="24584477">
@@ -29563,20 +29566,5 @@
     <nd ref="14211231356" />
     <tag k="highway" v="unclassified" />
     <tag k="oneway" v="no" />
-  </way>
-  <way id="-2">
-    <nd ref="14211231354" />
-    <nd ref="14211231355" />
-    <tag k="highway" v="unclassified" />
-  </way>
-  <way id="-3">
-    <nd ref="14211231353" />
-    <nd ref="14211231354" />
-    <tag k="highway" v="unclassified" />
-  </way>
-  <way id="-4">
-    <nd ref="14211231355" />
-    <nd ref="14211231356" />
-    <tag k="highway" v="unclassified" />
   </way>
 </osm>
